@@ -67,13 +67,14 @@ class Particle {
     }
 }
 
-// 彈道技能類別
+// 普攻彈道類別
 class Spell {
     constructor(x, y, targetX, targetY) {
         this.x = x;
         this.y = y;
         this.radius = 8;
-        this.speed = 12;
+        // 普攻彈道飛行速度調為原本的 30% (原數值 12 * 0.3 = 3.6)
+        this.speed = 3.6;
         this.isAlive = true;
 
         const angle = Math.atan2(targetY - y, targetX - x);
@@ -110,10 +111,12 @@ const player = {
     x: 180,
     y: 270,
     radius: 18,
-    speed: 4.5,
+    // 移動速度調為原本的 75% (原數值 4.5 * 0.75 = 3.375)
+    speed: 3.375,
     color: '#38bdf8',
     shootCooldown: 0,
-    maxCooldown: 12, // 幀數間隔 (約 0.2 秒一發)
+    // 普攻冷卻間隔 (幀數)。若維持原射速為 12；若射擊頻率亦需降為 30% 則改為 40
+    maxCooldown: 12,
 
     update() {
         // 八方向等速正規化移動
@@ -222,9 +225,8 @@ function gameLoop() {
         if (dist < spell.radius + dummy.radius) {
             spell.isAlive = false;
             dummy.takeDamage(20);
-            screenShake = 6; // 觸發畫面微震
+            screenShake = 6;
 
-            // 產生 15 個散開的燃燒粒子
             for (let p = 0; p < 15; p++) {
                 particles.push(new Particle(spell.x, spell.y, Math.random() < 0.5 ? '#f97316' : '#facc15'));
             }
@@ -277,7 +279,7 @@ function gameLoop() {
     player.draw(ctx);
     spells.forEach(s => s.draw(ctx));
 
-    // 特效使用加色模式提升發光感
+    // 特效加色合成
     ctx.globalCompositeOperation = 'lighter';
     particles.forEach(p => p.draw(ctx));
     ctx.globalCompositeOperation = 'source-over';
