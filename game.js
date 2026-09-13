@@ -600,8 +600,8 @@ const GameManager = {
     syncTimer: 0,
 
     selectedCoreId: 'STAR_WEAVER',
-    selectedFluxIds: new Set(),
-    selectedRhapsodyIds: new Set(),
+    selectedFluxId: null,
+    selectedRhapsodyId: null,
 
     localReady: false,
     remoteReady: false,
@@ -615,7 +615,11 @@ const GameManager = {
     },
 
     renderDynamicUI() {
-        // 1. 動態渲染核心記憶卡片
+        this.renderCoresUI();
+        this.updateSubSelections();
+    },
+
+    renderCoresUI() {
         DOM.coresContainer.innerHTML = '';
         Object.values(CORE_MEMORIES).forEach((core, idx) => {
             const card = document.createElement('div');
@@ -626,51 +630,53 @@ const GameManager = {
                 <div class="card-desc" style="color: #38bdf8; margin-top: 4px;">HP: ${core.baseStats.hpMax} ｜ 移速: ${core.baseStats.moveSpeed}</div>
             `;
             card.addEventListener('click', () => {
+                if (this.selectedCoreId === core.id) return;
                 document.querySelectorAll('#dynamic-cores-container .select-card').forEach(c => c.classList.remove('selected'));
                 card.classList.add('selected');
                 this.selectedCoreId = core.id;
+                this.updateSubSelections();
             });
             DOM.coresContainer.appendChild(card);
         });
+    },
 
-        // 2. 動態渲染流變天賦卡片
+    updateSubSelections() {
+        // 1. 過濾專屬流變並預設選取首項
+        const availableFluxes = Object.values(FLUX_TALENTS).filter(f => f.coreId === this.selectedCoreId);
+        this.selectedFluxId = availableFluxes.length > 0 ? availableFluxes[0].id : null;
         DOM.fluxContainer.innerHTML = '';
-        Object.values(FLUX_TALENTS).forEach((flux) => {
+
+        availableFluxes.forEach((flux) => {
             const card = document.createElement('div');
-            card.className = 'select-card';
+            card.className = `select-card ${flux.id === this.selectedFluxId ? 'selected' : ''}`;
             card.innerHTML = `
                 <div class="card-title">${flux.name}</div>
-                <div class="card-desc">目標屬性：${flux.targetPath}</div>
+                <div class="card-desc">${flux.description}</div>
             `;
             card.addEventListener('click', () => {
-                if (this.selectedFluxIds.has(flux.id)) {
-                    this.selectedFluxIds.delete(flux.id);
-                    card.classList.remove('selected');
-                } else {
-                    this.selectedFluxIds.add(flux.id);
-                    card.classList.add('selected');
-                }
+                this.selectedFluxId = flux.id;
+                document.querySelectorAll('#dynamic-flux-container .select-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
             });
             DOM.fluxContainer.appendChild(card);
         });
 
-        // 3. 動態渲染狂想機制卡片
+        // 2. 過濾專屬狂想並預設選取首項
+        const availableRhapsodies = Object.values(RHAPSODIES).filter(r => r.coreId === this.selectedCoreId);
+        this.selectedRhapsodyId = availableRhapsodies.length > 0 ? availableRhapsodies[0].id : null;
         DOM.rhapsodyContainer.innerHTML = '';
-        Object.values(RHAPSODIES).forEach((rhap) => {
+
+        availableRhapsodies.forEach((rhap) => {
             const card = document.createElement('div');
-            card.className = 'select-card';
+            card.className = `select-card ${rhap.id === this.selectedRhapsodyId ? 'selected' : ''}`;
             card.innerHTML = `
                 <div class="card-title">${rhap.name}</div>
                 <div class="card-desc">${rhap.description}</div>
             `;
             card.addEventListener('click', () => {
-                if (this.selectedRhapsodyIds.has(rhap.id)) {
-                    this.selectedRhapsodyIds.delete(rhap.id);
-                    card.classList.remove('selected');
-                } else {
-                    this.selectedRhapsodyIds.add(rhap.id);
-                    card.classList.add('selected');
-                }
+                this.selectedRhapsodyId = rhap.id;
+                document.querySelectorAll('#dynamic-rhapsody-container .select-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
             });
             DOM.rhapsodyContainer.appendChild(card);
         });
