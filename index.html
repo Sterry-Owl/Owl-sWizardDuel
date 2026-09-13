@@ -3,15 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wizard Duel Prototype</title>
+    <title>Wizard Duel - Combat Engine Prototype</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="ui-overlay">
-        <div>操作方式：[W, A, S, D] 移動走位 ｜ [滑鼠] 瞄準 ｜ [滑鼠左鍵] 發射火球</div>
-        <div id="status-text">假人血量：100%</div>
+    <div id="ui-container">
+        <div id="header-info">
+            <span id="core-name">當前核心：載入中...</span>
+            <span id="dummy-status">測試假人：HP 1000/1000 (物防 10 / 魔抗 10)</span>
+            <button id="btn-switch-core" type="button">切換測試核心 [Tab]</button>
+        </div>
+
+        <canvas id="gameCanvas" width="960" height="540"></canvas>
+
+        <div id="hud-container">
+            <div class="skill-slot" id="slot-attack">
+                <span class="slot-key">滑鼠左鍵</span>
+                <span class="slot-name">普攻</span>
+                <div class="cooldown-overlay" id="cd-attack"></div>
+            </div>
+            <div class="skill-slot" id="slot-1">
+                <span class="slot-key">Q / 1</span>
+                <span class="slot-name" id="name-skill-1">-</span>
+                <div class="cooldown-overlay" id="cd-skill-1"></div>
+            </div>
+            <div class="skill-slot" id="slot-2">
+                <span class="slot-key">W / 2</span>
+                <span class="slot-name" id="name-skill-2">-</span>
+                <div class="cooldown-overlay" id="cd-skill-2"></div>
+            </div>
+            <div class="skill-slot" id="slot-3">
+                <span class="slot-key">E / 3</span>
+                <span class="slot-name" id="name-skill-3">-</span>
+                <div class="cooldown-overlay" id="cd-skill-3"></div>
+            </div>
+        </div>
+        <div id="controls-hint">
+            操作說明：[W, A, S, D] 移動 ｜ [滑鼠] 瞄準 ｜ [左鍵] 普攻 ｜ [Q, W, E] 或 [1, 2, 3] 施放技能 ｜ [Tab] 切換核心配置
+        </div>
     </div>
-    <canvas id="gameCanvas" width="960" height="540"></canvas>
 
     <script type="module" src="game.js"></script>
 </body>
