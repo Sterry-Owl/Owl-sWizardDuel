@@ -22,6 +22,7 @@ const ENGINE_CONFIG = {
 const DOM = {
     lobbyPanel: document.getElementById('lobby-panel'),
     battleContainer: document.getElementById('battle-container'),
+    btnPracticeMode: document.getElementById('btn-practice-mode'),
     btnCreateRoom: document.getElementById('btn-create-room'),
     roomIdDisplay: document.getElementById('room-id-display'),
     inputRoomId: document.getElementById('input-room-id'),
@@ -451,6 +452,7 @@ class NetworkPlayer {
  */
 const GameManager = {
     state: GAME_STATE.LOBBY,
+    isPracticeMode: false,
     p1: new NetworkPlayer('p1', 180, 270, '#38bdf8'),
     p2: new NetworkPlayer('p2', 780, 270, '#f43f5e'),
     projectiles: [],
@@ -470,6 +472,13 @@ const GameManager = {
     },
 
     setupLobbyEvents() {
+        DOM.btnPracticeMode.addEventListener('click', () => {
+            this.isPracticeMode = true;
+            this.state = GAME_STATE.LOADOUT;
+            DOM.connectionStatus.textContent = '已進入單人訓練模式 (免連線)';
+            DOM.loadoutSelection.classList.remove('hidden');
+        });
+
         DOM.btnCreateRoom.addEventListener('click', async () => {
             DOM.btnCreateRoom.disabled = true;
             DOM.connectionStatus.textContent = '正在向信令伺服器註冊房間...';
@@ -500,9 +509,18 @@ const GameManager = {
         DOM.btnReady.addEventListener('click', () => {
             this.localReady = true;
             DOM.btnReady.disabled = true;
-            DOM.readyStatus.textContent = '已鎖定配置，等待對手...';
 
             const myLoadoutData = this.collectSelectedLoadout();
+
+            if (this.isPracticeMode) {
+                // 單人模式直接載入玩家配置，並替對手生成預設鋼鐵誓約假人
+                this.p1.applyLoadout(buildCombatLoadout(myLoadoutData.coreId, myLoadoutData.fluxIds, myLoadoutData.rhapsodyIds));
+                this.p2.applyLoadout(buildCombatLoadout('IRON_OATH', [], []));
+                this.startGame();
+                return;
+            }
+
+            DOM.readyStatus.textContent = '已鎖定配置，等待對手...';
             NetworkManager.send({
                 type: 'LOADOUT_READY',
                 loadout: myLoadoutData
@@ -602,6 +620,43 @@ const GameManager = {
 
     update(dt) {
         if (this.state !== GAME_STATE.IN_GAME) return;
+
+        if (this.isPracticeMode) {
+            // 單人訓練模式：僅更新玩家一，對手維持原地不動
+            const p1Move = Input.getMovementVector();
+            this.p1.update(dt, p1Move, Input.mouse, Input.activeTriggers, this.p2, this);
+            Input.clearTriggers();
+
+            // 對手血量歸零時自動補滿以供持續測試
+            if (this.p2.hp <= 0) {
+                this.p2.hp = this.p2.loadout.stats.hpMax;
+            }
+
+            // 彈道更新與碰撞
+            for (let i = this.projectiles.length - 1; i >= 0; i--) {
+                const p = this.projectiles[i];
+                p.update(dt);
+                const target = p.ownerId === 'p1' ? this.p2 : this.p1;
+                if (Math.hypot(p.x - target.x, p.y - target.y) < p.radius + target.radius) {
+                    p.isAlive = false;
+                    target.takeDamage(p.damage, p.damageType);
+                }
+                if (!p.isAlive) this.projectiles.splice(i, 1);
+            }
+
+            for (let i = this.meleeSweeps.length - 1; i >= 0; i--) {
+                this.meleeSweeps[i].update(dt);
+                if (this.meleeSweeps[i].life <= 0) this.meleeSweeps.splice(i, 1);
+            }
+
+            for (let i = this.groundAoes.length - 1; i >= 0; i--) {
+                this.groundAoes[i].update(dt);
+                if (!this.groundAoes[i].isAlive) this.groundAoes.splice(i, 1);
+            }
+
+            this.updateHUD();
+            return;
+        }
 
         if (NetworkManager.isHost) {
             // 主機負責運算全場實體
