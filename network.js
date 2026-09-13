@@ -18,8 +18,8 @@ export const NetworkManager = {
                 return;
             }
 
-            const randomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
-            this.peer = new window.Peer(`WZD-${randomCode}`, { debug: 1 });
+            const randomCode = Math.floor(1000 + Math.random() * 9000).toString();
+            this.peer = new window.Peer(randomCode, { debug: 1 });
 
             this.peer.on('open', (id) => {
                 this.roomId = id;
