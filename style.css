@@ -247,3 +247,21 @@ canvas {
     border-top: 2px solid #38bdf8;
     pointer-events: none;
 }
+/* ====== 天賦樹節點狀態 ====== */
+.select-card.talent-locked {
+    opacity: 0.35;
+    cursor: not-allowed;
+    border-style: dashed;
+    border-color: #334155;
+}
+
+.select-card.talent-locked:hover {
+    border-color: #334155;
+    background: #181d2a;
+}
+
+.select-card.talent-active {
+    border-color: #10b981 !important;
+    background: #064e3b !important;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.35);
+}
