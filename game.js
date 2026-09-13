@@ -32,6 +32,8 @@ const DOM = {
     loadoutSelection: document.getElementById('loadout-selection'),
     coresContainer: document.getElementById('dynamic-cores-container'),
     fluxContainer: document.getElementById('dynamic-flux-container'),
+    fluxPointsDisplay: document.getElementById('flux-points-display'),
+    btnResetFlux: document.getElementById('btn-reset-flux'),
     rhapsodyContainer: document.getElementById('dynamic-rhapsody-container'),
     btnReady: document.getElementById('btn-ready'),
     readyStatus: document.getElementById('ready-status'),
@@ -600,7 +602,8 @@ const GameManager = {
     syncTimer: 0,
 
     selectedCoreId: 'STAR_WEAVER',
-    selectedFluxId: null,
+    fluxPoints: 5,
+    selectedFluxIds: new Set(),
     selectedRhapsodyId: null,
 
     localReady: false,
@@ -634,6 +637,9 @@ const GameManager = {
                 document.querySelectorAll('#dynamic-cores-container .select-card').forEach(c => c.classList.remove('selected'));
                 card.classList.add('selected');
                 this.selectedCoreId = core.id;
+                // 重設點數與天賦集
+                this.fluxPoints = 5;
+                this.selectedFluxIds.clear();
                 this.updateSubSelections();
             });
             DOM.coresContainer.appendChild(card);
@@ -641,27 +647,65 @@ const GameManager = {
     },
 
     updateSubSelections() {
-        // 1. 過濾專屬流變並預設選取首項
+        // 1. 渲染流變天賦樹 (支援 5 點配點與前置驗證)
         const availableFluxes = Object.values(FLUX_TALENTS).filter(f => f.coreId === this.selectedCoreId);
-        this.selectedFluxId = availableFluxes.length > 0 ? availableFluxes[0].id : null;
         DOM.fluxContainer.innerHTML = '';
+        if (DOM.fluxPointsDisplay) DOM.fluxPointsDisplay.textContent = this.fluxPoints;
 
         availableFluxes.forEach((flux) => {
+            const isUnlocked = this.selectedFluxIds.has(flux.id);
+            const prerequisitesMet = flux.requires.length === 0 || flux.requires.every(reqId => this.selectedFluxIds.has(reqId));
+            const canAllocate = !isUnlocked && this.fluxPoints > 0 && prerequisitesMet;
+
             const card = document.createElement('div');
-            card.className = `select-card ${flux.id === this.selectedFluxId ? 'selected' : ''}`;
+            let statusClass = '';
+            if (isUnlocked) {
+                statusClass = 'talent-active';
+            } else if (!prerequisitesMet) {
+                statusClass = 'talent-locked';
+            }
+
+            const reqDesc = flux.requires.length > 0 
+                ? `<div style="font-size: 11px; color: #f59e0b; margin-top: 4px;">前置：${flux.requires.map(id => FLUX_TALENTS[id].name).join(', ')}</div>` 
+                : '<div style="font-size: 11px; color: #64748b; margin-top: 4px;">基礎天賦</div>';
+
+            card.className = `select-card ${statusClass}`;
             card.innerHTML = `
+                <div style="font-size: 11px; color: #94a3b8;">[${flux.branch}]</div>
                 <div class="card-title">${flux.name}</div>
                 <div class="card-desc">${flux.description}</div>
+                ${reqDesc}
             `;
+
             card.addEventListener('click', () => {
-                this.selectedFluxId = flux.id;
-                document.querySelectorAll('#dynamic-flux-container .select-card').forEach(c => c.classList.remove('selected'));
-                card.classList.add('selected');
+                // 退點邏輯：已解鎖且後續節點無人依賴此節點時可退點
+                if (isUnlocked) {
+                    const isRequiredByOthers = Array.from(this.selectedFluxIds).some(activeId => {
+                        const activeFlux = FLUX_TALENTS[activeId];
+                        return activeFlux.requires && activeFlux.requires.includes(flux.id);
+                    });
+                    if (isRequiredByOthers) {
+                        alert('無法退點：有後續已啟用的天賦依賴此節點。');
+                        return;
+                    }
+                    this.selectedFluxIds.delete(flux.id);
+                    this.fluxPoints++;
+                    this.updateSubSelections();
+                    return;
+                }
+
+                // 點亮邏輯：前置需達成且點數需大於 0
+                if (canAllocate) {
+                    this.selectedFluxIds.add(flux.id);
+                    this.fluxPoints--;
+                    this.updateSubSelections();
+                }
             });
+
             DOM.fluxContainer.appendChild(card);
         });
 
-        // 2. 過濾專屬狂想並預設選取首項
+        // 2. 渲染狂想機制 (維持單選)
         const availableRhapsodies = Object.values(RHAPSODIES).filter(r => r.coreId === this.selectedCoreId);
         this.selectedRhapsodyId = availableRhapsodies.length > 0 ? availableRhapsodies[0].id : null;
         DOM.rhapsodyContainer.innerHTML = '';
@@ -683,6 +727,11 @@ const GameManager = {
     },
 
     setupLobbyEvents() {
+        DOM.btnResetFlux.addEventListener('click', () => {
+            this.fluxPoints = 5;
+            this.selectedFluxIds.clear();
+            this.updateSubSelections();
+        });
         DOM.btnPracticeMode.addEventListener('click', () => {
             this.isPractice = true;
             this.state = GAME_STATE.LOADOUT;
@@ -723,7 +772,7 @@ const GameManager = {
 
             const payload = {
                 coreId: this.selectedCoreId,
-                fluxIds: this.selectedFluxId ? [this.selectedFluxId] : [],
+                fluxIds: Array.from(this.selectedFluxIds),
                 rhapsodyIds: this.selectedRhapsodyId ? [this.selectedRhapsodyId] : []
             };
 
