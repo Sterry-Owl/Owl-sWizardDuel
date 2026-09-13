@@ -1,20 +1,21 @@
-import { ATTACK_TYPE, DAMAGE_TYPE } from './definitions.js';
+import { ATTACK_TYPE, DAMAGE_TYPE, CORE_MEMORIES, FLUX_TALENTS, RHAPSODIES } from './definitions.js';
 import { buildCombatLoadout } from './builder.js';
 import { NetworkManager } from './network.js';
 
 /**
- * 引擎常數與狀態機列舉
+ * 引擎設定常數
  */
+const ENGINE_CONFIG = {
+    CANVAS: { WIDTH: 960, HEIGHT: 540, GRID_SIZE: 40, BG_COLOR: '#0e1117', GRID_COLOR: '#181f2e' },
+    SYNC_RATE: 1 / 30,
+    LERP_FACTOR: 18 // 快照平滑追蹤速率
+};
+
 const GAME_STATE = Object.freeze({
     LOBBY: 'LOBBY',
     LOADOUT: 'LOADOUT',
     IN_GAME: 'IN_GAME'
 });
-
-const ENGINE_CONFIG = {
-    CANVAS: { WIDTH: 960, HEIGHT: 540, GRID_SIZE: 40, GRID_COLOR: '#232733' },
-    SYNC_RATE: 1 / 30 // 主機廣播頻率 (30Hz)
-};
 
 /**
  * DOM 快取
@@ -24,20 +25,24 @@ const DOM = {
     battleContainer: document.getElementById('battle-container'),
     btnPracticeMode: document.getElementById('btn-practice-mode'),
     btnCreateRoom: document.getElementById('btn-create-room'),
-    roomIdDisplay: document.getElementById('room-id-display'),
-    inputRoomId: document.getElementById('input-room-id'),
     btnJoinRoom: document.getElementById('btn-join-room'),
+    inputRoomId: document.getElementById('input-room-id'),
+    roomIdDisplay: document.getElementById('room-id-display'),
     connectionStatus: document.getElementById('connection-status'),
     loadoutSelection: document.getElementById('loadout-selection'),
-    selectCore: document.getElementById('select-core'),
-    fluxCheckboxes: document.querySelectorAll('#flux-options input'),
-    rhapsodyCheckboxes: document.querySelectorAll('#rhapsody-options input'),
+    coresContainer: document.getElementById('dynamic-cores-container'),
+    fluxContainer: document.getElementById('dynamic-flux-container'),
+    rhapsodyContainer: document.getElementById('dynamic-rhapsody-container'),
     btnReady: document.getElementById('btn-ready'),
     readyStatus: document.getElementById('ready-status'),
     canvas: document.getElementById('gameCanvas'),
     ctx: document.getElementById('gameCanvas').getContext('2d'),
-    p1Info: document.getElementById('p1-info'),
-    p2Info: document.getElementById('p2-info'),
+    p1Name: document.getElementById('p1-name'),
+    p2Name: document.getElementById('p2-name'),
+    p1HpFill: document.getElementById('p1-hp-fill'),
+    p2HpFill: document.getElementById('p2-hp-fill'),
+    p1HpText: document.getElementById('p1-hp-text'),
+    p2HpText: document.getElementById('p2-hp-text'),
     cdAttack: document.getElementById('cd-attack'),
     cdSkills: [
         document.getElementById('cd-skill-1'),
@@ -52,36 +57,36 @@ const DOM = {
 };
 
 /**
- * 使用者輸入控制器
+ * 輸入監聽模組
  */
 const Input = {
     keys: {},
     mouse: { x: 0, y: 0, isDown: false },
-    activeTriggers: { attack: false, skill1: false, skill2: false, skill3: false },
+    triggers: { attack: false, skill1: false, skill2: false, skill3: false },
 
-    init(canvas) {
+    init(targetCanvas) {
         window.addEventListener('keydown', (e) => {
-            const key = e.key.toLowerCase();
-            this.keys[key] = true;
-            if (key === 'q' || key === '1') this.activeTriggers.skill1 = true;
-            if (key === 'w' || key === '2') this.activeTriggers.skill2 = true;
-            if (key === 'e' || key === '3') this.activeTriggers.skill3 = true;
+            const k = e.key.toLowerCase();
+            this.keys[k] = true;
+            if (k === 'q' || k === '1') this.triggers.skill1 = true;
+            if (k === 'w' || k === '2') this.triggers.skill2 = true;
+            if (k === 'e' || k === '3') this.triggers.skill3 = true;
         });
 
         window.addEventListener('keyup', (e) => {
             this.keys[e.key.toLowerCase()] = false;
         });
 
-        canvas.addEventListener('mousemove', (e) => {
-            const rect = canvas.getBoundingClientRect();
+        targetCanvas.addEventListener('mousemove', (e) => {
+            const rect = targetCanvas.getBoundingClientRect();
             this.mouse.x = e.clientX - rect.left;
             this.mouse.y = e.clientY - rect.top;
         });
 
-        canvas.addEventListener('mousedown', (e) => {
+        targetCanvas.addEventListener('mousedown', (e) => {
             if (e.button === 0) {
                 this.mouse.isDown = true;
-                this.activeTriggers.attack = true;
+                this.triggers.attack = true;
             }
         });
 
@@ -105,11 +110,13 @@ const Input = {
         return { x: dx, y: dy };
     },
 
-    clearTriggers() {
-        this.activeTriggers.attack = false;
-        this.activeTriggers.skill1 = false;
-        this.activeTriggers.skill2 = false;
-        this.activeTriggers.skill3 = false;
+    consumeTriggers() {
+        const copy = { ...this.triggers };
+        this.triggers.attack = false;
+        this.triggers.skill1 = false;
+        this.triggers.skill2 = false;
+        this.triggers.skill3 = false;
+        return copy;
     }
 };
 
@@ -117,7 +124,7 @@ const Input = {
  * 傷害計算器
  */
 const DamageCalculator = {
-    calculateDamage(attackerDamage, damageType, defenderStats) {
+    calculate(attackerDamage, damageType, defenderStats) {
         let reduction = 0;
         if (damageType === DAMAGE_TYPE.PHYSICAL) {
             reduction = defenderStats.physDef / (100 + defenderStats.physDef);
@@ -127,6 +134,101 @@ const DamageCalculator = {
         return Math.max(1, Math.round(attackerDamage * (1 - reduction)));
     }
 };
+
+/**
+ * 浮動戰鬥文字 (Floating Damage Numbers)
+ */
+class FloatingText {
+    constructor(x, y, text, color) {
+        this.x = x + (Math.random() - 0.5) * 16;
+        this.y = y - 10;
+        this.text = text;
+        this.color = color;
+        this.life = 0.8;
+        this.vy = -50;
+    }
+
+    update(dt) {
+        this.y += this.vy * dt;
+        this.life -= dt;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.life / 0.8);
+        ctx.font = 'bold 15px monospace';
+        ctx.fillStyle = this.color;
+        ctx.textAlign = 'center';
+        ctx.shadowColor = '#000000';
+        ctx.shadowBlur = 4;
+        ctx.fillText(this.text, this.x, this.y);
+        ctx.restore();
+    }
+}
+
+/**
+ * 粒子與視覺特效系統
+ */
+class VFXSystem {
+    constructor() {
+        this.particles = [];
+        this.floatingTexts = [];
+    }
+
+    spawnHit(x, y, color, count = 12) {
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 220 + 60;
+            this.particles.push({
+                x, y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                radius: Math.random() * 2.5 + 1.5,
+                color,
+                life: 0.4,
+                maxLife: 0.4
+            });
+        }
+    }
+
+    spawnDamageText(x, y, amount, damageType) {
+        const color = damageType === DAMAGE_TYPE.PHYSICAL ? '#fbbf24' : '#60a5fa';
+        this.floatingTexts.push(new FloatingText(x, y, `-${amount}`, color));
+    }
+
+    update(dt) {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.life -= dt;
+            if (p.life <= 0) this.particles.splice(i, 1);
+        }
+
+        for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+            const t = this.floatingTexts[i];
+            t.update(dt);
+            if (t.life <= 0) this.floatingTexts.splice(i, 1);
+        }
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (const p of this.particles) {
+            ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+        for (const t of this.floatingTexts) {
+            t.draw(ctx);
+        }
+    }
+}
 
 /**
  * 實體類別：彈道
@@ -161,9 +263,14 @@ class Projectile {
 
     draw(ctx) {
         ctx.save();
-        ctx.fillStyle = this.color;
+        // 光暈核
+        const grad = ctx.createRadialGradient(this.x, this.y, 1, this.x, this.y, this.radius * 1.6);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.4, this.color);
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y, this.radius * 1.6, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
     }
@@ -180,7 +287,7 @@ class MeleeSweepVisual {
         this.range = range;
         this.arcAngle = (arcAngle * Math.PI) / 180;
         this.color = color;
-        this.life = 0.15;
+        this.life = 0.16;
     }
 
     update(dt) {
@@ -189,23 +296,24 @@ class MeleeSweepVisual {
 
     draw(ctx) {
         ctx.save();
-        ctx.globalAlpha = Math.max(0, this.life / 0.15);
+        const alpha = Math.max(0, this.life / 0.16);
+        ctx.globalAlpha = alpha;
         ctx.strokeStyle = this.color;
         ctx.fillStyle = this.color;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.moveTo(this.x, this.y);
         ctx.arc(this.x, this.y, this.range, this.angle - this.arcAngle / 2, this.angle + this.arcAngle / 2);
         ctx.closePath();
         ctx.stroke();
-        ctx.globalAlpha *= 0.2;
+        ctx.globalAlpha = alpha * 0.2;
         ctx.fill();
         ctx.restore();
     }
 }
 
 /**
- * 實體類別：地面延時範圍傷害
+ * 實體類別：地面延時 AOE
  */
 class GroundAoeVisual {
     constructor(ownerId, x, y, radius, delay, damage, damageType, onExplode) {
@@ -232,12 +340,17 @@ class GroundAoeVisual {
     draw(ctx) {
         ctx.save();
         const progress = 1 - Math.max(0, this.delay / this.totalDelay);
+        // 符文預警邊緣
         ctx.strokeStyle = '#ef4444';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 6]);
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+
+        // 內部填充增長光環
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius * progress, 0, Math.PI * 2);
         ctx.fill();
@@ -246,23 +359,25 @@ class GroundAoeVisual {
 }
 
 /**
- * 玩家邏輯實體 (伺服端/本機端運算)
+ * 玩家實體類別 (整合預測與插值)
  */
-class NetworkPlayer {
-    constructor(id, x, y, color) {
+class ArenaPlayer {
+    constructor(id, x, y, baseColor) {
         this.id = id;
         this.x = x;
         this.y = y;
+        this.targetX = x; // 插值目標
+        this.targetY = y;
         this.radius = 18;
-        this.color = color;
+        this.color = baseColor;
         this.loadout = null;
 
         this.hp = 100;
         this.shield = 0;
         this.attackCooldown = 0;
         this.skillCooldowns = [0, 0, 0];
-        this.dashState = null;
         this.aimAngle = 0;
+        this.dashState = null;
     }
 
     applyLoadout(loadout) {
@@ -278,7 +393,7 @@ class NetworkPlayer {
 
         this.aimAngle = Math.atan2(mousePos.y - this.y, mousePos.x - this.x);
 
-        // 衝鋒位移處理
+        // 衝鋒狀態
         if (this.dashState) {
             this.dashState.timeRemaining -= dt;
             this.x += this.dashState.vx * dt;
@@ -286,7 +401,7 @@ class NetworkPlayer {
 
             const dist = Math.hypot(this.x - opponent.x, this.y - opponent.y);
             if (dist < this.radius + opponent.radius) {
-                opponent.takeDamage(this.dashState.damage, this.dashState.damageType);
+                opponent.takeDamage(this.dashState.damage, this.dashState.damageType, gameContext);
                 this.dashState = null;
             } else if (this.dashState.timeRemaining <= 0) {
                 this.dashState = null;
@@ -306,30 +421,42 @@ class NetworkPlayer {
             if (this.skillCooldowns[i] > 0) this.skillCooldowns[i] = Math.max(0, this.skillCooldowns[i] - dt);
         }
 
-        // 行動指令判定
-        if (triggers.attack) this.executeBasicAttack(mousePos, gameContext);
+        // 技能發動
+        if (triggers.attack) this.executeBasicAttack(gameContext);
         if (triggers.skill1) this.executeSkill(0, mousePos, opponent, gameContext);
         if (triggers.skill2) this.executeSkill(1, mousePos, opponent, gameContext);
         if (triggers.skill3) this.executeSkill(2, mousePos, opponent, gameContext);
     }
 
-    takeDamage(amount, damageType) {
-        const actualDmg = DamageCalculator.calculateDamage(amount, damageType, this.loadout.stats);
+    interpolate(dt) {
+        // 實體線性插值 (指數衰減插值避免網路跳動)
+        const factor = Math.min(1, dt * ENGINE_CONFIG.LERP_FACTOR);
+        this.x += (this.targetX - this.x) * factor;
+        this.y += (this.targetY - this.y) * factor;
+    }
+
+    takeDamage(amount, damageType, gameContext) {
+        const actual = DamageCalculator.calculate(amount, damageType, this.loadout.stats);
         if (this.shield > 0) {
-            if (this.shield >= actualDmg) {
-                this.shield -= actualDmg;
+            if (this.shield >= actual) {
+                this.shield -= actual;
+                gameContext.vfx.spawnHit(this.x, this.y, '#38bdf8');
                 return;
             } else {
-                const remain = actualDmg - this.shield;
+                const rem = actual - this.shield;
                 this.shield = 0;
-                this.hp = Math.max(0, this.hp - remain);
+                this.hp = Math.max(0, this.hp - rem);
+                gameContext.vfx.spawnDamageText(this.x, this.y, rem, damageType);
+                gameContext.vfx.spawnHit(this.x, this.y, this.color);
                 return;
             }
         }
-        this.hp = Math.max(0, this.hp - actualDmg);
+        this.hp = Math.max(0, this.hp - actual);
+        gameContext.vfx.spawnDamageText(this.x, this.y, actual, damageType);
+        gameContext.vfx.spawnHit(this.x, this.y, this.color);
     }
 
-    executeBasicAttack(mousePos, ctx) {
+    executeBasicAttack(ctx) {
         if (this.attackCooldown > 0) return;
         const atk = this.loadout.basicAttack;
 
@@ -378,17 +505,18 @@ class NetworkPlayer {
                 break;
             }
             case 'GROUND_AOE': {
-                const clampedDist = Math.min(distToMouse, skill.maxRange);
-                const targetX = this.x + Math.cos(this.aimAngle) * clampedDist;
-                const targetY = this.y + Math.sin(this.aimAngle) * clampedDist;
+                const clamped = Math.min(distToMouse, skill.maxRange);
+                const tx = this.x + Math.cos(this.aimAngle) * clamped;
+                const ty = this.y + Math.sin(this.aimAngle) * clamped;
 
                 ctx.groundAoes.push(new GroundAoeVisual(
-                    this.id, targetX, targetY, skill.radius, skill.delay,
+                    this.id, tx, ty, skill.radius, skill.delay,
                     skill.baseDamage, skill.damageType, (aoe) => {
-                        const dist = Math.hypot(opponent.x - aoe.x, opponent.y - aoe.y);
-                        if (dist <= aoe.radius + opponent.radius) {
-                            opponent.takeDamage(aoe.damage, aoe.damageType);
+                        const d = Math.hypot(opponent.x - aoe.x, opponent.y - aoe.y);
+                        if (d <= aoe.radius + opponent.radius) {
+                            opponent.takeDamage(aoe.damage, aoe.damageType, ctx);
                         }
+                        ctx.vfx.spawnHit(aoe.x, aoe.y, '#ef4444', 24);
                     }
                 ));
                 break;
@@ -401,12 +529,12 @@ class NetworkPlayer {
                 break;
             }
             case 'DASH_COLLIDE': {
-                const clampedDist = Math.min(distToMouse, skill.maxRange);
-                const duration = clampedDist / skill.dashSpeed;
+                const clamped = Math.min(distToMouse, skill.maxRange);
+                const dur = clamped / skill.dashSpeed;
                 this.dashState = {
                     vx: Math.cos(this.aimAngle) * skill.dashSpeed,
                     vy: Math.sin(this.aimAngle) * skill.dashSpeed,
-                    timeRemaining: duration,
+                    timeRemaining: dur,
                     damage: skill.baseDamage,
                     damageType: skill.damageType
                 };
@@ -418,25 +546,35 @@ class NetworkPlayer {
 
     draw(ctx) {
         ctx.save();
+        // 腳底立體陰影
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.beginPath();
+        ctx.ellipse(this.x, this.y + this.radius * 0.8, this.radius * 1.1, this.radius * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
         // 準星指示線
-        ctx.strokeStyle = '#64748b';
+        ctx.strokeStyle = '#475569';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(this.x, this.y);
-        ctx.lineTo(this.x + Math.cos(this.aimAngle) * (this.radius + 12), this.y + Math.sin(this.aimAngle) * (this.radius + 12));
+        ctx.lineTo(this.x + Math.cos(this.aimAngle) * (this.radius + 14), this.y + Math.sin(this.aimAngle) * (this.radius + 14));
         ctx.stroke();
 
-        // 護盾外圈
+        // 護盾外環
         if (this.shield > 0) {
             ctx.strokeStyle = '#38bdf8';
             ctx.lineWidth = 4;
             ctx.beginPath();
-            ctx.arc(this.x, this.y, this.radius + 5, 0, Math.PI * 2);
+            ctx.arc(this.x, this.y, this.radius + 6, 0, Math.PI * 2);
             ctx.stroke();
         }
 
-        // 角色本體
-        ctx.fillStyle = this.color;
+        // 角色本體多層漸層
+        const grad = ctx.createRadialGradient(this.x, this.y, 2, this.x, this.y, this.radius);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.6, this.color);
+        grad.addColorStop(1, '#0f172a');
+        ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fill();
@@ -448,59 +586,126 @@ class NetworkPlayer {
 }
 
 /**
- * 遊戲整體狀態與對戰管理系統
+ * 遊戲主管理器
  */
 const GameManager = {
     state: GAME_STATE.LOBBY,
-    isPracticeMode: false,
-    p1: new NetworkPlayer('p1', 180, 270, '#38bdf8'),
-    p2: new NetworkPlayer('p2', 780, 270, '#f43f5e'),
+    isPractice: false,
+    p1: new ArenaPlayer('p1', 180, 270, '#38bdf8'),
+    p2: new ArenaPlayer('p2', 780, 270, '#f43f5e'),
     projectiles: [],
     meleeSweeps: [],
     groundAoes: [],
+    vfx: new VFXSystem(),
     syncTimer: 0,
 
-    // 連線與準備標記
+    selectedCoreId: 'STAR_WEAVER',
+    selectedFluxIds: new Set(),
+    selectedRhapsodyIds: new Set(),
+
     localReady: false,
     remoteReady: false,
-    remoteInputs: { moveVec: { x: 0, y: 0 }, mouse: { x: 0, y: 0 }, triggers: {} },
+    remoteInputs: { move: { x: 0, y: 0 }, mouse: { x: 0, y: 0 }, triggers: {} },
 
     init() {
         Input.init(DOM.canvas);
+        this.renderDynamicUI();
         this.setupLobbyEvents();
         this.setupNetworkEvents();
     },
 
+    renderDynamicUI() {
+        // 1. 動態渲染核心記憶卡片
+        DOM.coresContainer.innerHTML = '';
+        Object.values(CORE_MEMORIES).forEach((core, idx) => {
+            const card = document.createElement('div');
+            card.className = `select-card ${idx === 0 ? 'selected' : ''}`;
+            card.innerHTML = `
+                <div class="card-title">${core.name}</div>
+                <div class="card-desc">${core.description}</div>
+                <div class="card-desc" style="color: #38bdf8; margin-top: 4px;">HP: ${core.baseStats.hpMax} ｜ 移速: ${core.baseStats.moveSpeed}</div>
+            `;
+            card.addEventListener('click', () => {
+                document.querySelectorAll('#dynamic-cores-container .select-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+                this.selectedCoreId = core.id;
+            });
+            DOM.coresContainer.appendChild(card);
+        });
+
+        // 2. 動態渲染流變天賦卡片
+        DOM.fluxContainer.innerHTML = '';
+        Object.values(FLUX_TALENTS).forEach((flux) => {
+            const card = document.createElement('div');
+            card.className = 'select-card';
+            card.innerHTML = `
+                <div class="card-title">${flux.name}</div>
+                <div class="card-desc">目標屬性：${flux.targetPath}</div>
+            `;
+            card.addEventListener('click', () => {
+                if (this.selectedFluxIds.has(flux.id)) {
+                    this.selectedFluxIds.delete(flux.id);
+                    card.classList.remove('selected');
+                } else {
+                    this.selectedFluxIds.add(flux.id);
+                    card.classList.add('selected');
+                }
+            });
+            DOM.fluxContainer.appendChild(card);
+        });
+
+        // 3. 動態渲染狂想機制卡片
+        DOM.rhapsodyContainer.innerHTML = '';
+        Object.values(RHAPSODIES).forEach((rhap) => {
+            const card = document.createElement('div');
+            card.className = 'select-card';
+            card.innerHTML = `
+                <div class="card-title">${rhap.name}</div>
+                <div class="card-desc">${rhap.description}</div>
+            `;
+            card.addEventListener('click', () => {
+                if (this.selectedRhapsodyIds.has(rhap.id)) {
+                    this.selectedRhapsodyIds.delete(rhap.id);
+                    card.classList.remove('selected');
+                } else {
+                    this.selectedRhapsodyIds.add(rhap.id);
+                    card.classList.add('selected');
+                }
+            });
+            DOM.rhapsodyContainer.appendChild(card);
+        });
+    },
+
     setupLobbyEvents() {
         DOM.btnPracticeMode.addEventListener('click', () => {
-            this.isPracticeMode = true;
+            this.isPractice = true;
             this.state = GAME_STATE.LOADOUT;
-            DOM.connectionStatus.textContent = '已進入單人訓練模式 (免連線)';
+            DOM.connectionStatus.textContent = '進入單人訓練場 (AI/假人模式)';
             DOM.loadoutSelection.classList.remove('hidden');
         });
 
         DOM.btnCreateRoom.addEventListener('click', async () => {
             DOM.btnCreateRoom.disabled = true;
-            DOM.connectionStatus.textContent = '正在向信令伺服器註冊房間...';
+            DOM.connectionStatus.textContent = '註冊專屬房間代碼...';
             try {
                 const id = await NetworkManager.init();
                 DOM.roomIdDisplay.textContent = `房間代碼：${id}`;
                 DOM.connectionStatus.textContent = '房間已建立，等待訪客連線...';
-            } catch (err) {
-                DOM.connectionStatus.textContent = '建立失敗，請檢查網路連線';
+            } catch {
+                DOM.connectionStatus.textContent = '建立失敗，請檢查網路狀態';
                 DOM.btnCreateRoom.disabled = false;
             }
         });
 
         DOM.btnJoinRoom.addEventListener('click', async () => {
-            const targetId = DOM.inputRoomId.value.trim();
-            if (!targetId) return;
+            const code = DOM.inputRoomId.value.trim();
+            if (!code) return;
             DOM.btnJoinRoom.disabled = true;
-            DOM.connectionStatus.textContent = '連線中...';
+            DOM.connectionStatus.textContent = '正建立 WebRTC P2P 連線...';
             try {
                 await NetworkManager.init();
-                NetworkManager.joinRoom(targetId);
-            } catch (err) {
+                NetworkManager.joinRoom(code);
+            } catch {
                 DOM.connectionStatus.textContent = '加入失敗';
                 DOM.btnJoinRoom.disabled = false;
             }
@@ -510,28 +715,27 @@ const GameManager = {
             this.localReady = true;
             DOM.btnReady.disabled = true;
 
-            const myLoadoutData = this.collectSelectedLoadout();
+            const payload = {
+                coreId: this.selectedCoreId,
+                fluxIds: Array.from(this.selectedFluxIds),
+                rhapsodyIds: Array.from(this.selectedRhapsodyIds)
+            };
 
-            if (this.isPracticeMode) {
-                // 單人模式直接載入玩家配置，並替對手生成預設鋼鐵誓約假人
-                this.p1.applyLoadout(buildCombatLoadout(myLoadoutData.coreId, myLoadoutData.fluxIds, myLoadoutData.rhapsodyIds));
+            if (this.isPractice) {
+                this.p1.applyLoadout(buildCombatLoadout(payload.coreId, payload.fluxIds, payload.rhapsodyIds));
                 this.p2.applyLoadout(buildCombatLoadout('IRON_OATH', [], []));
                 this.startGame();
                 return;
             }
 
-            DOM.readyStatus.textContent = '已鎖定配置，等待對手...';
-            NetworkManager.send({
-                type: 'LOADOUT_READY',
-                loadout: myLoadoutData
-            });
+            DOM.readyStatus.textContent = '配置已鎖定，等待對手...';
+            NetworkManager.send({ type: 'LOADOUT_READY', loadout: payload });
 
             if (NetworkManager.isHost) {
-                this.p1.applyLoadout(buildCombatLoadout(myLoadoutData.coreId, myLoadoutData.fluxIds, myLoadoutData.rhapsodyIds));
+                this.p1.applyLoadout(buildCombatLoadout(payload.coreId, payload.fluxIds, payload.rhapsodyIds));
             } else {
-                this.p2.applyLoadout(buildCombatLoadout(myLoadoutData.coreId, myLoadoutData.fluxIds, myLoadoutData.rhapsodyIds));
+                this.p2.applyLoadout(buildCombatLoadout(payload.coreId, payload.fluxIds, payload.rhapsodyIds));
             }
-
             this.checkMatchStart();
         });
     },
@@ -575,13 +779,6 @@ const GameManager = {
         };
     },
 
-    collectSelectedLoadout() {
-        const coreId = DOM.selectCore.value;
-        const fluxIds = Array.from(DOM.fluxCheckboxes).filter(c => c.checked).map(c => c.value);
-        const rhapsodyIds = Array.from(DOM.rhapsodyCheckboxes).filter(c => c.checked).map(c => c.value);
-        return { coreId, fluxIds, rhapsodyIds };
-    },
-
     checkMatchStart() {
         if (this.localReady && this.remoteReady && NetworkManager.isHost) {
             NetworkManager.send({ type: 'START_GAME' });
@@ -594,79 +791,54 @@ const GameManager = {
         DOM.lobbyPanel.classList.add('hidden');
         DOM.battleContainer.classList.remove('hidden');
 
-        // 更新 HUD 名稱
-        const myPlayer = NetworkManager.isHost ? this.p1 : this.p2;
+        DOM.p1Name.textContent = `P1: ${this.p1.loadout.name}`;
+        DOM.p2Name.textContent = `P2: ${this.p2.loadout.name}`;
+
+        const myPlayer = (this.isPractice || NetworkManager.isHost) ? this.p1 : this.p2;
         for (let i = 0; i < 3; i++) {
             DOM.nameSkills[i].textContent = myPlayer.loadout.skills[i].name;
         }
     },
 
     checkMeleeHit(attacker, angle, range, arcAngle, damage, damageType) {
-        const defender = attacker.id === 'p1' ? this.p2 : this.p1;
-        const dx = defender.x - attacker.x;
-        const dy = defender.y - attacker.y;
-        const distance = Math.hypot(dx, dy);
+        const def = attacker.id === 'p1' ? this.p2 : this.p1;
+        const dist = Math.hypot(def.x - attacker.x, def.y - attacker.y);
+        if (dist > range + def.radius) return;
 
-        if (distance > range + defender.radius) return;
+        let diff = Math.atan2(def.y - attacker.y, def.x - attacker.x) - angle;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
 
-        let angleDiff = Math.atan2(dy, dx) - angle;
-        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-
-        if (Math.abs(angleDiff) <= ((arcAngle * Math.PI) / 180) / 2) {
-            defender.takeDamage(damage, damageType);
+        if (Math.abs(diff) <= ((arcAngle * Math.PI) / 180) / 2) {
+            def.takeDamage(damage, damageType, this);
         }
     },
 
     update(dt) {
         if (this.state !== GAME_STATE.IN_GAME) return;
 
-        if (this.isPracticeMode) {
-            // 單人訓練模式：僅更新玩家一，對手維持原地不動
+        this.vfx.update(dt);
+
+        if (this.isPractice) {
             const p1Move = Input.getMovementVector();
-            this.p1.update(dt, p1Move, Input.mouse, Input.activeTriggers, this.p2, this);
-            Input.clearTriggers();
+            const triggers = Input.consumeTriggers();
+            this.p1.update(dt, p1Move, Input.mouse, triggers, this.p2, this);
 
-            // 對手血量歸零時自動補滿以供持續測試
-            if (this.p2.hp <= 0) {
-                this.p2.hp = this.p2.loadout.stats.hpMax;
-            }
+            if (this.p2.hp <= 0) this.p2.hp = this.p2.loadout.stats.hpMax;
 
-            // 彈道更新與碰撞
-            for (let i = this.projectiles.length - 1; i >= 0; i--) {
-                const p = this.projectiles[i];
-                p.update(dt);
-                const target = p.ownerId === 'p1' ? this.p2 : this.p1;
-                if (Math.hypot(p.x - target.x, p.y - target.y) < p.radius + target.radius) {
-                    p.isAlive = false;
-                    target.takeDamage(p.damage, p.damageType);
-                }
-                if (!p.isAlive) this.projectiles.splice(i, 1);
-            }
-
-            for (let i = this.meleeSweeps.length - 1; i >= 0; i--) {
-                this.meleeSweeps[i].update(dt);
-                if (this.meleeSweeps[i].life <= 0) this.meleeSweeps.splice(i, 1);
-            }
-
-            for (let i = this.groundAoes.length - 1; i >= 0; i--) {
-                this.groundAoes[i].update(dt);
-                if (!this.groundAoes[i].isAlive) this.groundAoes.splice(i, 1);
-            }
-
+            this.updateSimulatedEntities(dt);
             this.updateHUD();
             return;
         }
 
         if (NetworkManager.isHost) {
-            // 主機負責運算全場實體
             const p1Move = Input.getMovementVector();
-            this.p1.update(dt, p1Move, Input.mouse, Input.activeTriggers, this.p2, this);
-            Input.clearTriggers();
+            const p1Triggers = Input.consumeTriggers();
+            this.p1.update(dt, p1Move, Input.mouse, p1Triggers, this.p2, this);
 
             this.p2.update(
                 dt,
-                this.remoteInputs.moveVec || { x: 0, y: 0 },
+                this.remoteInputs.move || { x: 0, y: 0 },
                 this.remoteInputs.mouse || { x: 0, y: 0 },
                 this.remoteInputs.triggers || {},
                 this.p1,
@@ -674,29 +846,9 @@ const GameManager = {
             );
             this.remoteInputs.triggers = {};
 
-            // 彈道更新與碰撞
-            for (let i = this.projectiles.length - 1; i >= 0; i--) {
-                const p = this.projectiles[i];
-                p.update(dt);
-                const target = p.ownerId === 'p1' ? this.p2 : this.p1;
-                if (Math.hypot(p.x - target.x, p.y - target.y) < p.radius + target.radius) {
-                    p.isAlive = false;
-                    target.takeDamage(p.damage, p.damageType);
-                }
-                if (!p.isAlive) this.projectiles.splice(i, 1);
-            }
+            this.updateSimulatedEntities(dt);
 
-            for (let i = this.meleeSweeps.length - 1; i >= 0; i--) {
-                this.meleeSweeps[i].update(dt);
-                if (this.meleeSweeps[i].life <= 0) this.meleeSweeps.splice(i, 1);
-            }
-
-            for (let i = this.groundAoes.length - 1; i >= 0; i--) {
-                this.groundAoes[i].update(dt);
-                if (!this.groundAoes[i].isAlive) this.groundAoes.splice(i, 1);
-            }
-
-            // 定頻向訪客廣播戰局快照 (30Hz)
+            // 主機定期向訪客廣播全場快照 (30Hz)
             this.syncTimer += dt;
             if (this.syncTimer >= ENGINE_CONFIG.SYNC_RATE) {
                 this.syncTimer = 0;
@@ -712,38 +864,82 @@ const GameManager = {
                 });
             }
         } else {
-            // 訪客端：採樣輸入並傳送至主機
+            // 訪客端核心：客戶端預測 (Client-side Prediction)
+            const p2Move = Input.getMovementVector();
+            const triggers = Input.consumeTriggers();
+
+            // 本地直接計算移動，完全消除等待主機回傳的延遲
+            this.p2.x += p2Move.x * this.p2.loadout.stats.moveSpeed * dt;
+            this.p2.y += p2Move.y * this.p2.loadout.stats.moveSpeed * dt;
+            this.p2.x = Math.max(this.p2.radius, Math.min(ENGINE_CONFIG.CANVAS.WIDTH - this.p2.radius, this.p2.x));
+            this.p2.y = Math.max(this.p2.radius, Math.min(ENGINE_CONFIG.CANVAS.HEIGHT - this.p2.radius, this.p2.y));
+            this.p2.aimAngle = Math.atan2(Input.mouse.y - this.p2.y, Input.mouse.x - this.p2.x);
+
+            // 對主機進行線性插值追蹤
+            this.p1.interpolate(dt);
+
+            // 發送操作封包
             NetworkManager.send({
                 type: 'CLIENT_INPUT',
                 input: {
-                    moveVec: Input.getMovementVector(),
+                    move: p2Move,
                     mouse: Input.mouse,
-                    triggers: { ...Input.activeTriggers }
+                    triggers
                 }
             });
-            Input.clearTriggers();
         }
 
         this.updateHUD();
     },
 
+    updateSimulatedEntities(dt) {
+        for (let i = this.projectiles.length - 1; i >= 0; i--) {
+            const p = this.projectiles[i];
+            p.update(dt);
+            const target = p.ownerId === 'p1' ? this.p2 : this.p1;
+            if (Math.hypot(p.x - target.x, p.y - target.y) < p.radius + target.radius) {
+                p.isAlive = false;
+                target.takeDamage(p.damage, p.damageType, this);
+            }
+            if (!p.isAlive) this.projectiles.splice(i, 1);
+        }
+
+        for (let i = this.meleeSweeps.length - 1; i >= 0; i--) {
+            this.meleeSweeps[i].update(dt);
+            if (this.meleeSweeps[i].life <= 0) this.meleeSweeps.splice(i, 1);
+        }
+
+        for (let i = this.groundAoes.length - 1; i >= 0; i--) {
+            this.groundAoes[i].update(dt);
+            if (!this.groundAoes[i].isAlive) this.groundAoes.splice(i, 1);
+        }
+    },
+
     applySnapshot(s) {
-        this.p1.x = s.p1.x; this.p1.y = s.p1.y; this.p1.hp = s.p1.hp; this.p1.shield = s.p1.shield; this.p1.aimAngle = s.p1.aim;
-        this.p2.x = s.p2.x; this.p2.y = s.p2.y; this.p2.hp = s.p2.hp; this.p2.shield = s.p2.shield; this.p2.aimAngle = s.p2.aim;
+        // 主機授權位置和解 (Reconciliation)
+        this.p1.targetX = s.p1.x;
+        this.p1.targetY = s.p1.y;
+        this.p1.hp = s.p1.hp;
+        this.p1.shield = s.p1.shield;
+        this.p1.aimAngle = s.p1.aim;
+
+        // 若本地預測與伺服器差距過大才進行平滑校正
+        const delta = Math.hypot(this.p2.x - s.p2.x, this.p2.y - s.p2.y);
+        if (delta > 40) {
+            this.p2.x = s.p2.x;
+            this.p2.y = s.p2.y;
+        }
+        this.p2.hp = s.p2.hp;
+        this.p2.shield = s.p2.shield;
         this.p2.attackCooldown = s.p2.cdAtk;
         this.p2.skillCooldowns = s.p2.cds;
 
-        this.projectiles = s.projectiles.map(p => {
-            const inst = new Projectile('remote', p.x, p.y, 0, 0, p.r, 999, 0, '', p.c);
-            return inst;
-        });
-
+        this.projectiles = s.projectiles.map(p => new Projectile('remote', p.x, p.y, 0, 0, p.r, 999, 0, '', p.c));
         this.meleeSweeps = s.sweeps.map(sw => {
             const inst = new MeleeSweepVisual(sw.x, sw.y, sw.a, sw.r, (sw.arc * 180) / Math.PI, sw.c);
             inst.life = sw.life;
             return inst;
         });
-
         this.groundAoes = s.aoes.map(a => {
             const inst = new GroundAoeVisual('remote', a.x, a.y, a.r, a.delay, 0, '', null);
             inst.totalDelay = a.total;
@@ -753,22 +949,29 @@ const GameManager = {
 
     updateHUD() {
         if (!this.p1.loadout || !this.p2.loadout) return;
-        DOM.p1Info.textContent = `P1 (${this.p1.loadout.name})：HP ${this.p1.hp}/${this.p1.loadout.stats.hpMax} ${this.p1.shield > 0 ? `[護盾: ${this.p1.shield}]` : ''}`;
-        DOM.p2Info.textContent = `P2 (${this.p2.loadout.name})：HP ${this.p2.hp}/${this.p2.loadout.stats.hpMax} ${this.p2.shield > 0 ? `[護盾: ${this.p2.shield}]` : ''}`;
 
-        const myPlayer = NetworkManager.isHost ? this.p1 : this.p2;
-        DOM.cdAttack.style.height = `${(myPlayer.attackCooldown / myPlayer.loadout.basicAttack.cooldown) * 100}%`;
+        const p1HpRatio = Math.max(0, this.p1.hp / this.p1.loadout.stats.hpMax);
+        const p2HpRatio = Math.max(0, this.p2.hp / this.p2.loadout.stats.hpMax);
+
+        DOM.p1HpFill.style.width = `${p1HpRatio * 100}%`;
+        DOM.p2HpFill.style.width = `${p2HpRatio * 100}%`;
+        DOM.p1HpText.textContent = `${this.p1.hp}/${this.p1.loadout.stats.hpMax} ${this.p1.shield > 0 ? `(+${this.p1.shield})` : ''}`;
+        DOM.p2HpText.textContent = `${this.p2.hp}/${this.p2.loadout.stats.hpMax} ${this.p2.shield > 0 ? `(+${this.p2.shield})` : ''}`;
+
+        const me = (this.isPractice || NetworkManager.isHost) ? this.p1 : this.p2;
+        DOM.cdAttack.style.height = `${(me.attackCooldown / me.loadout.basicAttack.cooldown) * 100}%`;
         for (let i = 0; i < 3; i++) {
-            DOM.cdSkills[i].style.height = `${(myPlayer.skillCooldowns[i] / myPlayer.loadout.skills[i].cooldown) * 100}%`;
+            DOM.cdSkills[i].style.height = `${(me.skillCooldowns[i] / me.loadout.skills[i].cooldown) * 100}%`;
         }
     },
 
     render() {
         if (this.state !== GAME_STATE.IN_GAME) return;
         const ctx = DOM.ctx;
+
         ctx.clearRect(0, 0, ENGINE_CONFIG.CANVAS.WIDTH, ENGINE_CONFIG.CANVAS.HEIGHT);
 
-        // 格線背景
+        // 背景暗角網格
         ctx.strokeStyle = ENGINE_CONFIG.CANVAS.GRID_COLOR;
         ctx.lineWidth = 1;
         for (let x = 0; x < ENGINE_CONFIG.CANVAS.WIDTH; x += ENGINE_CONFIG.CANVAS.GRID_SIZE) {
@@ -778,16 +981,18 @@ const GameManager = {
             ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(ENGINE_CONFIG.CANVAS.WIDTH, y); ctx.stroke();
         }
 
+        // 實體與特效渲染
         this.groundAoes.forEach(a => a.draw(ctx));
         this.p1.draw(ctx);
         this.p2.draw(ctx);
         this.projectiles.forEach(p => p.draw(ctx));
         this.meleeSweeps.forEach(s => s.draw(ctx));
+        this.vfx.draw(ctx);
     }
 };
 
 /**
- * 引擎主迴圈
+ * 主循環
  */
 let lastTimestamp = 0;
 function mainLoop(timestamp) {
