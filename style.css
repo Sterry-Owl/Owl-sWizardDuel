@@ -1,0 +1,38 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: #0d0e15;
+    color: #ffffff;
+    font-family: monospace, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+}
+
+#ui-overlay {
+    margin-bottom: 12px;
+    display: flex;
+    gap: 24px;
+    font-size: 14px;
+    color: #94a3b8;
+}
+
+#status-text {
+    color: #38bdf8;
+    font-weight: bold;
+}
+
+canvas {
+    background-color: #1a1c23;
+    border: 2px solid #334155;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+    border-radius: 4px;
+    cursor: crosshair;
+}
