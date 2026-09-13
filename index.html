@@ -3,88 +3,87 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wizard Duel - P2P Combat</title>
+    <title>Wizard Duel - Advanced Combat Arena</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
     <div id="app">
-        <!-- 階段一與階段二：連線大廳與選角面板 -->
+        <!-- 連線與動態選角大廳 -->
         <div id="lobby-panel" class="overlay-panel">
-            <h2 id="lobby-title">巫師對決：連線大廳</h2>
+            <h2 id="lobby-title">巫師對決：戰鬥工坊</h2>
             
             <div id="room-controls">
-                <div class="control-group">
-                    <button id="btn-create-room" type="button">建立房間 (身為主機)</button>
+                <div class="control-row">
+                    <button id="btn-practice-mode" type="button" class="btn-primary">進入單人訓練場</button>
+                    <button id="btn-create-room" type="button" class="btn-secondary">建立雙人房間</button>
+                </div>
+                <div class="control-row">
                     <span id="room-id-display">房間代碼：未建立</span>
                 </div>
-                <div class="control-group">
-                    <input id="input-room-id" type="text" placeholder="輸入 8 碼房間代碼 (如: WZD-ABCD)">
-                    <button id="btn-join-room" type="button">加入房間</button>
+                <div class="control-row">
+                    <input id="input-room-id" type="text" placeholder="輸入房間代碼 (例: WZD-ABCD)">
+                    <button id="btn-join-room" type="button" class="btn-secondary">加入連線</button>
                 </div>
-                <div class="control-group">
-                    <button id="btn-practice-mode" type="button" style="background-color: #059669;">進入單人訓練模式</button>
-                </div>
-                <div id="connection-status">連線狀態：等待操作...</div>
+                <div id="connection-status">狀態：等待玩家配置中...</div>
             </div>
 
+            <!-- 動態資料掛載容器 -->
             <div id="loadout-selection" class="hidden">
-                <h3>配置戰鬥載荷</h3>
-                <div class="selection-section">
-                    <label>核心紡車 (角色)：</label>
-                    <select id="select-core">
-                        <option value="STAR_WEAVER">星軌編織者 (遠程魔法)</option>
-                        <option value="IRON_OATH">鋼鐵誓約 (近戰物理)</option>
-                    </select>
+                <div class="section-title">1. 選擇核心記憶 (Core Memory)</div>
+                <div id="dynamic-cores-container" class="grid-container"></div>
+
+                <div class="section-title">2. 注入流變天賦 (Flux Modifiers)</div>
+                <div id="dynamic-flux-container" class="grid-container"></div>
+
+                <div class="section-title">3. 狂想機制重構 (Rhapsody Mutations)</div>
+                <div id="dynamic-rhapsody-container" class="grid-container"></div>
+
+                <div class="action-footer">
+                    <button id="btn-ready" type="button" class="btn-primary">確認並鎖定配置</button>
+                    <div id="ready-status">配置未鎖定</div>
                 </div>
-                <div class="selection-section">
-                    <label>流變天賦 (數值增強)：</label>
-                    <div id="flux-options">
-                        <label><input type="checkbox" value="FLUX_HP_BOOST"> 生命塑形 (+50 HP)</label>
-                        <label><input type="checkbox" value="FLUX_SWIFT_FOOT"> 流光步法 (+15% 移速)</label>
-                        <label><input type="checkbox" value="FLUX_AETHER_FLOW"> 乙太湧動 (-20% 普攻冷卻)</label>
-                    </div>
-                </div>
-                <div class="selection-section">
-                    <label>狂想重構 (機制變更)：</label>
-                    <div id="rhapsody-options">
-                        <label><input type="checkbox" value="RHAP_TRIPLE_BOLT"> 狂想：三重星軌 (星軌彈變為 3 發散射)</label>
-                        <label><input type="checkbox" value="RHAP_COLOSSAL_CLEAVE"> 狂想：碎裂巨劈 (巨劈範圍放大 50%)</label>
-                    </div>
-                </div>
-                <button id="btn-ready" type="button">確認並鎖定準備</button>
-                <div id="ready-status">等待雙方鎖定準備...</div>
             </div>
         </div>
 
-        <!-- 階段三：戰鬥畫面 -->
+        <!-- 戰鬥場景容器 -->
         <div id="battle-container" class="hidden">
-            <div id="header-info">
-                <span id="p1-info">P1 (房主)：HP 0/0</span>
-                <span id="match-timer">戰鬥進行中</span>
-                <span id="p2-info">P2 (訪客)：HP 0/0</span>
+            <div id="hud-top">
+                <div class="player-hud-card" id="p1-card">
+                    <div class="hud-name" id="p1-name">P1</div>
+                    <div class="hp-bar-bg"><div class="hp-bar-fill" id="p1-hp-fill"></div></div>
+                    <div class="hp-text" id="p1-hp-text">0/0</div>
+                </div>
+
+                <div id="match-timer">DUEL ARENA</div>
+
+                <div class="player-hud-card" id="p2-card">
+                    <div class="hud-name" id="p2-name">P2</div>
+                    <div class="hp-bar-bg"><div class="hp-bar-fill" id="p2-hp-fill"></div></div>
+                    <div class="hp-text" id="p2-hp-text">0/0</div>
+                </div>
             </div>
 
             <canvas id="gameCanvas" width="960" height="540"></canvas>
 
-            <div id="hud-container">
+            <div id="hud-bottom">
                 <div class="skill-slot" id="slot-attack">
-                    <span class="slot-key">滑鼠左鍵</span>
+                    <span class="slot-key">左鍵</span>
                     <span class="slot-name">普攻</span>
                     <div class="cooldown-overlay" id="cd-attack"></div>
                 </div>
                 <div class="skill-slot" id="slot-1">
-                    <span class="slot-key">Q / 1</span>
+                    <span class="slot-key">Q</span>
                     <span class="slot-name" id="name-skill-1">-</span>
                     <div class="cooldown-overlay" id="cd-skill-1"></div>
                 </div>
                 <div class="skill-slot" id="slot-2">
-                    <span class="slot-key">W / 2</span>
+                    <span class="slot-key">W</span>
                     <span class="slot-name" id="name-skill-2">-</span>
                     <div class="cooldown-overlay" id="cd-skill-2"></div>
                 </div>
                 <div class="skill-slot" id="slot-3">
-                    <span class="slot-key">E / 3</span>
+                    <span class="slot-key">E</span>
                     <span class="slot-name" id="name-skill-3">-</span>
                     <div class="cooldown-overlay" id="cd-skill-3"></div>
                 </div>
