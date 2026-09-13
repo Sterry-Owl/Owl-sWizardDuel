@@ -14,19 +14,38 @@ body {
     justify-content: center;
     min-height: 100vh;
     overflow: hidden;
+    user-select: none;
 }
 
-#ui-overlay {
-    margin-bottom: 12px;
+#ui-container {
     display: flex;
-    gap: 24px;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+#header-info {
+    width: 960px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     font-size: 14px;
     color: #94a3b8;
 }
 
-#status-text {
-    color: #38bdf8;
-    font-weight: bold;
+#btn-switch-core {
+    background-color: #334155;
+    color: #f8fafc;
+    border: 1px solid #475569;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+}
+
+#btn-switch-core:hover {
+    background-color: #475569;
 }
 
 canvas {
@@ -35,4 +54,55 @@ canvas {
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
     border-radius: 4px;
     cursor: crosshair;
+}
+
+#hud-container {
+    width: 960px;
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 4px;
+}
+
+.skill-slot {
+    position: relative;
+    width: 120px;
+    height: 56px;
+    background-color: #1e293b;
+    border: 1px solid #475569;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+}
+
+.slot-key {
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+.slot-name {
+    font-size: 13px;
+    font-weight: bold;
+    color: #e2e8f0;
+    margin-top: 2px;
+}
+
+.cooldown-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 0%;
+    background-color: rgba(15, 23, 42, 0.75);
+    border-top: 2px solid #38bdf8;
+    pointer-events: none;
+    transition: height 0.05s linear;
+}
+
+#controls-hint {
+    font-size: 12px;
+    color: #64748b;
 }
