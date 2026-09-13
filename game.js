@@ -69,8 +69,8 @@ const Input = {
             const k = e.key.toLowerCase();
             this.keys[k] = true;
             if (k === 'q' || k === '1') this.triggers.skill1 = true;
-            if (k === 'w' || k === '2') this.triggers.skill2 = true;
-            if (k === 'e' || k === '3') this.triggers.skill3 = true;
+            if (k === 'e' || k === '2') this.triggers.skill2 = true;
+            if (k === 'r' || k === '3') this.triggers.skill3 = true;
         });
 
         window.addEventListener('keyup', (e) => {
