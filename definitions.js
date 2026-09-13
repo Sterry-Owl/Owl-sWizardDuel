@@ -140,46 +140,63 @@ export const CORE_MEMORIES = Object.freeze({
  * 流變資料庫 (數值天賦，針對基礎屬性或全域數值增益)
  */
 export const FLUX_TALENTS = Object.freeze({
-    FLUX_HP_BOOST: {
-        id: 'FLUX_HP_BOOST',
-        name: '生命塑形',
-        targetPath: 'stats.hpMax',
-        operator: MODIFIER_OPERATOR.ADD,
-        value: 50
-    },
-    FLUX_SWIFT_FOOT: {
-        id: 'FLUX_SWIFT_FOOT',
-        name: '流光步法',
-        targetPath: 'stats.moveSpeed',
-        operator: MODIFIER_OPERATOR.MULTIPLY,
-        value: 0.15 // +15%
-    },
-    FLUX_AETHER_FLOW: {
-        id: 'FLUX_AETHER_FLOW',
+
+    FLUX_SW_AETHER: {
+        id: 'FLUX_SW_AETHER',
+        coreId: 'STAR_WEAVER',
         name: '乙太湧動',
+        description: '減少 20% 普攻冷卻時間。',
         targetPath: 'basicAttack.cooldown',
         operator: MODIFIER_OPERATOR.MULTIPLY,
-        value: -0.20 // 減少 20% 冷卻
+        value: -0.20
+    },
+    FLUX_SW_HP: {
+        id: 'FLUX_SW_HP',
+        coreId: 'STAR_WEAVER',
+        name: '星體塑形',
+        description: '提升 40 點最大生命值。',
+        targetPath: 'stats.hpMax',
+        operator: MODIFIER_OPERATOR.ADD,
+        value: 40
+    },
+
+    FLUX_IO_SPEED: {
+        id: 'FLUX_IO_SPEED',
+        coreId: 'IRON_OATH',
+        name: '流光步法',
+        description: '提升 15% 移動速度。',
+        targetPath: 'stats.moveSpeed',
+        operator: MODIFIER_OPERATOR.MULTIPLY,
+        value: 0.15
+    },
+    FLUX_IO_DEF: {
+        id: 'FLUX_IO_DEF',
+        coreId: 'IRON_OATH',
+        name: '誓約護體',
+        description: '物理防禦基礎值提升 15 點。',
+        targetPath: 'stats.physDef',
+        operator: MODIFIER_OPERATOR.ADD,
+        value: 15
     }
 });
 
-/**
- * 狂想資料庫 (機制重構，直接覆蓋或注入技能屬性與邏輯)
- */
 export const RHAPSODIES = Object.freeze({
     RHAP_TRIPLE_BOLT: {
         id: 'RHAP_TRIPLE_BOLT',
+        coreId: 'STAR_WEAVER',
         name: '狂想：三重星軌',
         targetSkillId: 'STAR_BOLT',
         description: '星軌彈不再發射單發，而是以扇形散射 3 發彈道，但每發傷害降低 30%。',
         mutation: (skill) => {
             skill.projectileCount = 3;
-            skill.spreadAngle = 30; // 散射角度
+            skill.spreadAngle = 30;
             skill.baseDamage *= 0.7;
         }
     },
+
     RHAP_COLOSSAL_CLEAVE: {
         id: 'RHAP_COLOSSAL_CLEAVE',
+        coreId: 'IRON_OATH',
         name: '狂想：碎裂巨劈',
         targetSkillId: 'HEAVY_CLEAVE',
         description: '重壓順劈的攻擊範圍擴大 50%，並附帶擊退效果。',
