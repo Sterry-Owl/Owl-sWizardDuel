@@ -5,9 +5,9 @@
 }
 
 body {
-    background-color: #0d0e15;
-    color: #ffffff;
-    font-family: monospace, sans-serif;
+    background-color: #090a0f;
+    color: #f1f5f9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -17,60 +17,207 @@ body {
     user-select: none;
 }
 
-#ui-container {
+.hidden {
+    display: none !important;
+}
+
+/* ====== 大廳與動態卡片樣式 ====== */
+.overlay-panel {
+    width: 860px;
+    max-height: 90vh;
+    background: linear-gradient(145deg, #131722, #0d1017);
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 24px;
     display: flex;
     flex-direction: column;
+    gap: 16px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8), 0 0 1px 1px rgba(255, 255, 255, 0.05);
+    overflow-y: auto;
+}
+
+#lobby-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #e2e8f0;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #1e293b;
+    padding-bottom: 12px;
+}
+
+.control-row {
+    display: flex;
+    gap: 12px;
     align-items: center;
+    margin-bottom: 8px;
+}
+
+.section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 12px;
+    margin-bottom: 6px;
+}
+
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 10px;
 }
 
-#header-info {
+.select-card {
+    background: #181d2a;
+    border: 1px solid #273142;
+    border-radius: 6px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.select-card:hover {
+    border-color: #38bdf8;
+    background: #1e2638;
+}
+
+.select-card.selected {
+    border-color: #38bdf8;
+    background: #172554;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+}
+
+.card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.card-desc {
+    font-size: 12px;
+    color: #94a3b8;
+    line-height: 1.4;
+}
+
+.btn-primary {
+    background: #0284c7;
+    color: #ffffff;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.btn-primary:hover { background: #0369a1; }
+
+.btn-secondary {
+    background: #1e293b;
+    color: #cbd5e1;
+    border: 1px solid #334155;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.btn-secondary:hover { background: #334155; }
+
+input[type="text"] {
+    background: #0b0f19;
+    border: 1px solid #273142;
+    color: #f8fafc;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+}
+
+/* ====== 戰鬥介面與 HUD ====== */
+#battle-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+#hud-top {
     width: 960px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 14px;
-    color: #94a3b8;
 }
 
-#btn-switch-core {
-    background-color: #334155;
-    color: #f8fafc;
-    border: 1px solid #475569;
-    padding: 6px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
+.player-hud-card {
+    width: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.hud-name {
     font-size: 13px;
+    font-weight: 700;
 }
 
-#btn-switch-core:hover {
-    background-color: #475569;
+.hp-bar-bg {
+    width: 100%;
+    height: 10px;
+    background: #1e293b;
+    border-radius: 5px;
+    overflow: hidden;
+    position: relative;
+}
+
+.hp-bar-fill {
+    width: 100%;
+    height: 100%;
+    background: #10b981;
+    transition: width 0.15s ease-out;
+}
+
+.hp-text {
+    font-size: 11px;
+    color: #94a3b8;
+    text-align: right;
+}
+
+#match-timer {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    color: #475569;
 }
 
 canvas {
-    background-color: #1a1c23;
-    border: 2px solid #334155;
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
-    border-radius: 4px;
+    background-color: #0e1117;
+    border: 2px solid #1e293b;
+    box-shadow: 0 0 35px rgba(0, 0, 0, 0.85);
+    border-radius: 8px;
     cursor: crosshair;
 }
 
-#hud-container {
+#hud-bottom {
     width: 960px;
     display: flex;
     justify-content: center;
     gap: 16px;
-    margin-top: 4px;
 }
 
 .skill-slot {
     position: relative;
-    width: 120px;
-    height: 56px;
-    background-color: #1e293b;
-    border: 1px solid #475569;
-    border-radius: 4px;
+    width: 110px;
+    height: 52px;
+    background: #131824;
+    border: 1px solid #273142;
+    border-radius: 6px;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -79,15 +226,15 @@ canvas {
 }
 
 .slot-key {
-    font-size: 11px;
-    color: #94a3b8;
+    font-size: 10px;
+    color: #64748b;
+    font-weight: 700;
 }
 
 .slot-name {
-    font-size: 13px;
-    font-weight: bold;
+    font-size: 12px;
+    font-weight: 600;
     color: #e2e8f0;
-    margin-top: 2px;
 }
 
 .cooldown-overlay {
@@ -96,88 +243,7 @@ canvas {
     left: 0;
     width: 100%;
     height: 0%;
-    background-color: rgba(15, 23, 42, 0.75);
+    background-color: rgba(15, 23, 42, 0.8);
     border-top: 2px solid #38bdf8;
     pointer-events: none;
-    transition: height 0.05s linear;
-}
-
-#controls-hint {
-    font-size: 12px;
-    color: #64748b;
-}
-/* ====== 模組 C：大廳與選角面板樣式 ====== */
-.hidden {
-    display: none !important;
-}
-
-.overlay-panel {
-    width: 600px;
-    background-color: #1e293b;
-    border: 1px solid #475569;
-    border-radius: 8px;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-}
-
-.control-group {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin-bottom: 8px;
-}
-
-input[type="text"], select {
-    background-color: #0f172a;
-    border: 1px solid #334155;
-    color: #f8fafc;
-    padding: 8px 12px;
-    border-radius: 4px;
-    font-family: inherit;
-    font-size: 14px;
-}
-
-button {
-    background-color: #2563eb;
-    color: #ffffff;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
-    font-weight: bold;
-}
-
-button:hover {
-    background-color: #1d4ed8;
-}
-
-button:disabled {
-    background-color: #475569;
-    cursor: not-allowed;
-}
-
-.selection-section {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 8px;
-}
-
-#flux-options, #rhapsody-options {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding-left: 8px;
-    font-size: 13px;
-    color: #cbd5e1;
-}
-
-#connection-status, #ready-status {
-    font-size: 13px;
-    color: #38bdf8;
-    margin-top: 4px;
 }
