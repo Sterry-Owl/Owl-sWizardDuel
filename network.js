@@ -7,15 +7,10 @@ export const NetworkManager = {
     isHost: false,
     roomId: null,
 
-    // 回呼函式掛載
     onDataReceived: null,
     onConnected: null,
     onDisconnected: null,
 
-    /**
-     * 初始化 Peer 節點
-     * @returns {Promise<string>} 回傳分配到的 Peer ID
-     */
     init() {
         return new Promise((resolve, reject) => {
             if (typeof window.Peer === 'undefined') {
@@ -23,7 +18,6 @@ export const NetworkManager = {
                 return;
             }
 
-            // 產生隨機房間後綴代碼 (4碼英數)
             const randomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
             this.peer = new window.Peer(`WZD-${randomCode}`, { debug: 1 });
 
@@ -33,7 +27,6 @@ export const NetworkManager = {
             });
 
             this.peer.on('connection', (conn) => {
-                // 僅允許單一對手連線 (1v1)
                 if (this.connection) {
                     conn.close();
                     return;
@@ -48,20 +41,17 @@ export const NetworkManager = {
         });
     },
 
-    /**
-     * 加入指定房間
-     * @param {string} targetRoomId 目標房間 ID
-     */
     joinRoom(targetRoomId) {
         if (!this.peer) return;
         this.isHost = false;
-        const conn = this.peer.connect(targetRoomId, { reliable: true });
+        // 採用無序非阻塞通道以達到極致低延遲
+        const conn = this.peer.connect(targetRoomId, {
+            reliable: false,
+            serialization: 'json'
+        });
         this.setupConnection(conn);
     },
 
-    /**
-     * 設定資料通道監聽
-     */
     setupConnection(conn) {
         this.connection = conn;
 
@@ -85,10 +75,6 @@ export const NetworkManager = {
         });
     },
 
-    /**
-     * 傳送封包
-     * @param {object} payload 欲傳送的資料物件
-     */
     send(payload) {
         if (this.connection && this.connection.open) {
             this.connection.send(payload);
