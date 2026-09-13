@@ -1,31 +1,42 @@
 import { ATTACK_TYPE, DAMAGE_TYPE } from './definitions.js';
 import { buildCombatLoadout } from './builder.js';
+import { NetworkManager } from './network.js';
 
 /**
- * 引擎常數定義
+ * 引擎常數與狀態機列舉
  */
+const GAME_STATE = Object.freeze({
+    LOBBY: 'LOBBY',
+    LOADOUT: 'LOADOUT',
+    IN_GAME: 'IN_GAME'
+});
+
 const ENGINE_CONFIG = {
-    CANVAS: {
-        WIDTH: 960,
-        HEIGHT: 540,
-        GRID_SIZE: 40,
-        GRID_COLOR: '#232733'
-    },
-    VFX: {
-        SCREEN_SHAKE_DECAY: 0.85,
-        PARTICLE_COUNT: 12
-    }
+    CANVAS: { WIDTH: 960, HEIGHT: 540, GRID_SIZE: 40, GRID_COLOR: '#232733' },
+    SYNC_RATE: 1 / 30 // 主機廣播頻率 (30Hz)
 };
 
 /**
- * DOM 節點快取
+ * DOM 快取
  */
 const DOM = {
+    lobbyPanel: document.getElementById('lobby-panel'),
+    battleContainer: document.getElementById('battle-container'),
+    btnCreateRoom: document.getElementById('btn-create-room'),
+    roomIdDisplay: document.getElementById('room-id-display'),
+    inputRoomId: document.getElementById('input-room-id'),
+    btnJoinRoom: document.getElementById('btn-join-room'),
+    connectionStatus: document.getElementById('connection-status'),
+    loadoutSelection: document.getElementById('loadout-selection'),
+    selectCore: document.getElementById('select-core'),
+    fluxCheckboxes: document.querySelectorAll('#flux-options input'),
+    rhapsodyCheckboxes: document.querySelectorAll('#rhapsody-options input'),
+    btnReady: document.getElementById('btn-ready'),
+    readyStatus: document.getElementById('ready-status'),
     canvas: document.getElementById('gameCanvas'),
     ctx: document.getElementById('gameCanvas').getContext('2d'),
-    coreName: document.getElementById('core-name'),
-    dummyStatus: document.getElementById('dummy-status'),
-    btnSwitchCore: document.getElementById('btn-switch-core'),
+    p1Info: document.getElementById('p1-info'),
+    p2Info: document.getElementById('p2-info'),
     cdAttack: document.getElementById('cd-attack'),
     cdSkills: [
         document.getElementById('cd-skill-1'),
@@ -40,38 +51,33 @@ const DOM = {
 };
 
 /**
- * 輸入監聽模組
+ * 使用者輸入控制器
  */
 const Input = {
     keys: {},
     mouse: { x: 0, y: 0, isDown: false },
     activeTriggers: { attack: false, skill1: false, skill2: false, skill3: false },
 
-    init(canvasElement) {
+    init(canvas) {
         window.addEventListener('keydown', (e) => {
             const key = e.key.toLowerCase();
             this.keys[key] = true;
-
             if (key === 'q' || key === '1') this.activeTriggers.skill1 = true;
             if (key === 'w' || key === '2') this.activeTriggers.skill2 = true;
             if (key === 'e' || key === '3') this.activeTriggers.skill3 = true;
-            if (key === 'tab') {
-                e.preventDefault();
-                GameManager.toggleLoadout();
-            }
         });
 
         window.addEventListener('keyup', (e) => {
             this.keys[e.key.toLowerCase()] = false;
         });
 
-        canvasElement.addEventListener('mousemove', (e) => {
-            const rect = canvasElement.getBoundingClientRect();
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
             this.mouse.x = e.clientX - rect.left;
             this.mouse.y = e.clientY - rect.top;
         });
 
-        canvasElement.addEventListener('mousedown', (e) => {
+        canvas.addEventListener('mousedown', (e) => {
             if (e.button === 0) {
                 this.mouse.isDown = true;
                 this.activeTriggers.attack = true;
@@ -96,11 +102,18 @@ const Input = {
             dy *= 0.70710678;
         }
         return { x: dx, y: dy };
+    },
+
+    clearTriggers() {
+        this.activeTriggers.attack = false;
+        this.activeTriggers.skill1 = false;
+        this.activeTriggers.skill2 = false;
+        this.activeTriggers.skill3 = false;
     }
 };
 
 /**
- * 傷害計算管線
+ * 傷害計算器
  */
 const DamageCalculator = {
     calculateDamage(attackerDamage, damageType, defenderStats) {
@@ -115,125 +128,11 @@ const DamageCalculator = {
 };
 
 /**
- * 粒子與視覺特效系統
- */
-class Particle {
-    constructor(x, y, color) {
-        this.x = x;
-        this.y = y;
-        this.color = color;
-        this.radius = Math.random() * 3 + 2;
-        const angle = Math.random() * Math.PI * 2;
-        const speed = Math.random() * 200 + 50;
-        this.vx = Math.cos(angle) * speed;
-        this.vy = Math.sin(angle) * speed;
-        this.life = 1.0;
-        this.decay = Math.random() * 2.0 + 1.0;
-    }
-
-    update(dt) {
-        this.x += this.vx * dt;
-        this.y += this.vy * dt;
-        this.life -= this.decay * dt;
-    }
-
-    draw(ctx) {
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, this.life);
-        ctx.fillStyle = this.color;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    }
-}
-
-/**
- * 近戰扇形揮擊視覺與判定實體
- */
-class MeleeSweepVisual {
-    constructor(x, y, angle, range, arcAngle, color) {
-        this.x = x;
-        this.y = y;
-        this.angle = angle;
-        this.range = range;
-        this.arcAngle = (arcAngle * Math.PI) / 180;
-        this.color = color;
-        this.life = 0.15;
-        this.totalLife = 0.15;
-    }
-
-    update(dt) {
-        this.life -= dt;
-    }
-
-    draw(ctx) {
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, this.life / this.totalLife);
-        ctx.strokeStyle = this.color;
-        ctx.fillStyle = this.color;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(this.x, this.y);
-        ctx.arc(
-            this.x,
-            this.y,
-            this.range,
-            this.angle - this.arcAngle / 2,
-            this.angle + this.arcAngle / 2
-        );
-        ctx.closePath();
-        ctx.stroke();
-        ctx.globalAlpha *= 0.25;
-        ctx.fill();
-        ctx.restore();
-    }
-}
-
-/**
- * 地面延遲範圍傷害實體 (Ground AOE)
- */
-class GroundAoeVisual {
-    constructor(x, y, radius, delay, onExplode) {
-        this.x = x;
-        this.y = y;
-        this.radius = radius;
-        this.delay = delay;
-        this.totalDelay = delay;
-        this.onExplode = onExplode;
-        this.isAlive = true;
-    }
-
-    update(dt) {
-        this.delay -= dt;
-        if (this.delay <= 0) {
-            this.isAlive = false;
-            this.onExplode(this.x, this.y, this.radius);
-        }
-    }
-
-    draw(ctx) {
-        ctx.save();
-        const progress = 1 - Math.max(0, this.delay / this.totalDelay);
-        ctx.strokeStyle = '#ef4444';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.stroke();
-
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius * progress, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    }
-}
-
-/**
- * 彈道飛行實體
+ * 實體類別：彈道
  */
 class Projectile {
-    constructor(x, y, angle, speed, radius, maxRange, damage, damageType, color) {
+    constructor(ownerId, x, y, angle, speed, radius, maxRange, damage, damageType, color) {
+        this.ownerId = ownerId;
         this.x = x;
         this.y = y;
         this.vx = Math.cos(angle) * speed;
@@ -242,7 +141,7 @@ class Projectile {
         this.damage = damage;
         this.damageType = damageType;
         this.color = color;
-        this.remainingDistance = maxRange;
+        this.remainingDist = maxRange;
         this.isAlive = true;
     }
 
@@ -250,9 +149,9 @@ class Projectile {
         const step = Math.hypot(this.vx * dt, this.vy * dt);
         this.x += this.vx * dt;
         this.y += this.vy * dt;
-        this.remainingDistance -= step;
+        this.remainingDist -= step;
 
-        if (this.remainingDistance <= 0 || 
+        if (this.remainingDist <= 0 || 
             this.x < 0 || this.x > ENGINE_CONFIG.CANVAS.WIDTH || 
             this.y < 0 || this.y > ENGINE_CONFIG.CANVAS.HEIGHT) {
             this.isAlive = false;
@@ -270,105 +169,130 @@ class Projectile {
 }
 
 /**
- * 測試假人實體
+ * 實體類別：近戰揮擊視覺
  */
-class TargetDummy {
-    constructor(x, y) {
+class MeleeSweepVisual {
+    constructor(x, y, angle, range, arcAngle, color) {
         this.x = x;
         this.y = y;
-        this.radius = 24;
-        this.stats = {
-            hpMax: 1000,
-            physDef: 10,
-            magicRes: 10
-        };
-        this.currentHp = this.stats.hpMax;
+        this.angle = angle;
+        this.range = range;
+        this.arcAngle = (arcAngle * Math.PI) / 180;
+        this.color = color;
+        this.life = 0.15;
     }
 
-    takeDamage(amount, damageType) {
-        const actualDamage = DamageCalculator.calculateDamage(amount, damageType, this.stats);
-        this.currentHp = Math.max(0, this.currentHp - actualDamage);
-        GameManager.triggerShake(4);
-        GameManager.spawnParticles(this.x, this.y, damageType === DAMAGE_TYPE.PHYSICAL ? '#f59e0b' : '#38bdf8');
-
-        if (this.currentHp <= 0) {
-            this.currentHp = this.stats.hpMax;
-        }
-        DOM.dummyStatus.textContent = `測試假人：HP ${this.currentHp}/${this.stats.hpMax} (物防 ${this.stats.physDef} / 魔抗 ${this.stats.magicRes}) - 受傷 ${actualDamage}`;
+    update(dt) {
+        this.life -= dt;
     }
 
     draw(ctx) {
         ctx.save();
-        ctx.fillStyle = '#f43f5e';
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.globalAlpha = Math.max(0, this.life / 0.15);
+        ctx.strokeStyle = this.color;
+        ctx.fillStyle = this.color;
         ctx.lineWidth = 3;
-        ctx.strokeStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.arc(this.x, this.y, this.range, this.angle - this.arcAngle / 2, this.angle + this.arcAngle / 2);
+        ctx.closePath();
         ctx.stroke();
-
-        const barW = 60;
-        const barH = 6;
-        const hpRate = this.currentHp / this.stats.hpMax;
-        ctx.fillStyle = '#334155';
-        ctx.fillRect(this.x - barW / 2, this.y - this.radius - 14, barW, barH);
-        ctx.fillStyle = '#22c55e';
-        ctx.fillRect(this.x - barW / 2, this.y - this.radius - 14, barW * hpRate, barH);
+        ctx.globalAlpha *= 0.2;
+        ctx.fill();
         ctx.restore();
     }
 }
 
 /**
- * 玩家戰鬥實體
+ * 實體類別：地面延時範圍傷害
  */
-class CombatPlayer {
-    constructor(x, y, loadout) {
+class GroundAoeVisual {
+    constructor(ownerId, x, y, radius, delay, damage, damageType, onExplode) {
+        this.ownerId = ownerId;
+        this.x = x;
+        this.y = y;
+        this.radius = radius;
+        this.delay = delay;
+        this.totalDelay = delay;
+        this.damage = damage;
+        this.damageType = damageType;
+        this.onExplode = onExplode;
+        this.isAlive = true;
+    }
+
+    update(dt) {
+        this.delay -= dt;
+        if (this.delay <= 0) {
+            this.isAlive = false;
+            if (this.onExplode) this.onExplode(this);
+        }
+    }
+
+    draw(ctx) {
+        ctx.save();
+        const progress = 1 - Math.max(0, this.delay / this.totalDelay);
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * progress, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+/**
+ * 玩家邏輯實體 (伺服端/本機端運算)
+ */
+class NetworkPlayer {
+    constructor(id, x, y, color) {
+        this.id = id;
         this.x = x;
         this.y = y;
         this.radius = 18;
+        this.color = color;
+        this.loadout = null;
+
+        this.hp = 100;
+        this.shield = 0;
+        this.attackCooldown = 0;
+        this.skillCooldowns = [0, 0, 0];
+        this.dashState = null;
+        this.aimAngle = 0;
+    }
+
+    applyLoadout(loadout) {
         this.loadout = loadout;
-
-        this.currentHp = loadout.stats.hpMax;
+        this.hp = loadout.stats.hpMax;
         this.shield = 0;
-        this.damageReduction = 0;
-
-        // 冷卻計時器
         this.attackCooldown = 0;
         this.skillCooldowns = [0, 0, 0];
-
-        // 衝鋒狀態
-        this.dashState = null;
     }
 
-    setLoadout(newLoadout) {
-        this.loadout = newLoadout;
-        this.currentHp = newLoadout.stats.hpMax;
-        this.shield = 0;
-        this.damageReduction = 0;
-        this.attackCooldown = 0;
-        this.skillCooldowns = [0, 0, 0];
-        this.dashState = null;
-    }
+    update(dt, inputVector, mousePos, triggers, opponent, gameContext) {
+        if (!this.loadout) return;
 
-    update(dt, input) {
-        // 衝鋒中優先處理位移
+        this.aimAngle = Math.atan2(mousePos.y - this.y, mousePos.x - this.x);
+
+        // 衝鋒位移處理
         if (this.dashState) {
             this.dashState.timeRemaining -= dt;
             this.x += this.dashState.vx * dt;
             this.y += this.dashState.vy * dt;
 
-            // 衝鋒碰撞判定
-            const dist = Math.hypot(this.x - GameManager.dummy.x, this.y - GameManager.dummy.y);
-            if (dist < this.radius + GameManager.dummy.radius) {
-                GameManager.dummy.takeDamage(this.dashState.damage, this.dashState.damageType);
+            const dist = Math.hypot(this.x - opponent.x, this.y - opponent.y);
+            if (dist < this.radius + opponent.radius) {
+                opponent.takeDamage(this.dashState.damage, this.dashState.damageType);
                 this.dashState = null;
             } else if (this.dashState.timeRemaining <= 0) {
                 this.dashState = null;
             }
         } else {
-            const moveVec = input.getMovementVector();
-            this.x += moveVec.x * this.loadout.stats.moveSpeed * dt;
-            this.y += moveVec.y * this.loadout.stats.moveSpeed * dt;
+            this.x += inputVector.x * this.loadout.stats.moveSpeed * dt;
+            this.y += inputVector.y * this.loadout.stats.moveSpeed * dt;
         }
 
         // 邊界防禦
@@ -376,130 +300,111 @@ class CombatPlayer {
         this.y = Math.max(this.radius, Math.min(ENGINE_CONFIG.CANVAS.HEIGHT - this.radius, this.y));
 
         // 冷卻時間遞減
-        if (this.attackCooldown > 0) {
-            this.attackCooldown = Math.max(0, this.attackCooldown - dt);
-        }
-        for (let i = 0; i < this.skillCooldowns.length; i++) {
-            if (this.skillCooldowns[i] > 0) {
-                this.skillCooldowns[i] = Math.max(0, this.skillCooldowns[i] - dt);
-            }
+        if (this.attackCooldown > 0) this.attackCooldown = Math.max(0, this.attackCooldown - dt);
+        for (let i = 0; i < 3; i++) {
+            if (this.skillCooldowns[i] > 0) this.skillCooldowns[i] = Math.max(0, this.skillCooldowns[i] - dt);
         }
 
-        // 指令輸入判定
-        if (input.activeTriggers.attack) {
-            this.executeBasicAttack(input.mouse);
-            input.activeTriggers.attack = false;
-        }
-        if (input.activeTriggers.skill1) {
-            this.executeSkill(0, input.mouse);
-            input.activeTriggers.skill1 = false;
-        }
-        if (input.activeTriggers.skill2) {
-            this.executeSkill(1, input.mouse);
-            input.activeTriggers.skill2 = false;
-        }
-        if (input.activeTriggers.skill3) {
-            this.executeSkill(2, input.mouse);
-            input.activeTriggers.skill3 = false;
-        }
+        // 行動指令判定
+        if (triggers.attack) this.executeBasicAttack(mousePos, gameContext);
+        if (triggers.skill1) this.executeSkill(0, mousePos, opponent, gameContext);
+        if (triggers.skill2) this.executeSkill(1, mousePos, opponent, gameContext);
+        if (triggers.skill3) this.executeSkill(2, mousePos, opponent, gameContext);
     }
 
-    executeBasicAttack(mouse) {
+    takeDamage(amount, damageType) {
+        const actualDmg = DamageCalculator.calculateDamage(amount, damageType, this.loadout.stats);
+        if (this.shield > 0) {
+            if (this.shield >= actualDmg) {
+                this.shield -= actualDmg;
+                return;
+            } else {
+                const remain = actualDmg - this.shield;
+                this.shield = 0;
+                this.hp = Math.max(0, this.hp - remain);
+                return;
+            }
+        }
+        this.hp = Math.max(0, this.hp - actualDmg);
+    }
+
+    executeBasicAttack(mousePos, ctx) {
         if (this.attackCooldown > 0) return;
         const atk = this.loadout.basicAttack;
-        const angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
 
         if (atk.attackType === ATTACK_TYPE.RANGED) {
-            GameManager.projectiles.push(
-                new Projectile(
-                    this.x, this.y, angle, atk.speed, atk.radius,
-                    atk.maxRange, atk.damage, atk.damageType, '#38bdf8'
-                )
-            );
+            ctx.projectiles.push(new Projectile(
+                this.id, this.x, this.y, this.aimAngle, atk.speed,
+                atk.radius, atk.maxRange, atk.damage, atk.damageType, this.color
+            ));
         } else if (atk.attackType === ATTACK_TYPE.MELEE) {
-            GameManager.meleeSweeps.push(
-                new MeleeSweepVisual(this.x, this.y, angle, atk.maxRange, atk.swingAngle, '#fbbf24')
-            );
-            this.checkSectorCollision(angle, atk.maxRange, atk.swingAngle, atk.damage, atk.damageType);
+            ctx.meleeSweeps.push(new MeleeSweepVisual(
+                this.x, this.y, this.aimAngle, atk.maxRange, atk.swingAngle, this.color
+            ));
+            ctx.checkMeleeHit(this, this.aimAngle, atk.maxRange, atk.swingAngle, atk.damage, atk.damageType);
         }
-
         this.attackCooldown = atk.cooldown;
     }
 
-    executeSkill(index, mouse) {
+    executeSkill(index, mousePos, opponent, ctx) {
         if (this.skillCooldowns[index] > 0) return;
         const skill = this.loadout.skills[index];
         if (!skill) return;
 
-        const angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
-        const distToMouse = Math.hypot(mouse.x - this.x, mouse.y - this.y);
+        const distToMouse = Math.hypot(mousePos.x - this.x, mousePos.y - this.y);
 
         switch (skill.mechanic) {
             case 'PROJECTILE_STRAIGHT': {
                 const count = skill.projectileCount || 1;
                 const spread = ((skill.spreadAngle || 0) * Math.PI) / 180;
-                const startAngle = angle - spread / 2;
+                const startAngle = this.aimAngle - spread / 2;
                 const angleStep = count > 1 ? spread / (count - 1) : 0;
 
                 for (let i = 0; i < count; i++) {
-                    const currentAngle = count === 1 ? angle : startAngle + angleStep * i;
-                    GameManager.projectiles.push(
-                        new Projectile(
-                            this.x, this.y, currentAngle, skill.projectileSpeed,
-                            skill.radius, skill.maxRange, skill.baseDamage,
-                            skill.damageType, '#818cf8'
-                        )
-                    );
+                    const angle = count === 1 ? this.aimAngle : startAngle + angleStep * i;
+                    ctx.projectiles.push(new Projectile(
+                        this.id, this.x, this.y, angle, skill.projectileSpeed,
+                        skill.radius, skill.maxRange, skill.baseDamage, skill.damageType, '#818cf8'
+                    ));
                 }
                 break;
             }
-
             case 'SELF_BUFF': {
                 if (skill.shieldValue) {
                     this.shield = skill.shieldValue;
                     setTimeout(() => { this.shield = 0; }, skill.duration * 1000);
                 }
-                if (skill.damageReduction) {
-                    this.damageReduction = skill.damageReduction;
-                    setTimeout(() => { this.damageReduction = 0; }, skill.duration * 1000);
-                }
-                GameManager.spawnParticles(this.x, this.y, '#38bdf8');
                 break;
             }
-
             case 'GROUND_AOE': {
-                // 最大施法射程限制
                 const clampedDist = Math.min(distToMouse, skill.maxRange);
-                const targetX = this.x + Math.cos(angle) * clampedDist;
-                const targetY = this.y + Math.sin(angle) * clampedDist;
+                const targetX = this.x + Math.cos(this.aimAngle) * clampedDist;
+                const targetY = this.y + Math.sin(this.aimAngle) * clampedDist;
 
-                GameManager.groundAoes.push(
-                    new GroundAoeVisual(targetX, targetY, skill.radius, skill.delay, (ex, ey, r) => {
-                        GameManager.triggerShake(8);
-                        GameManager.spawnParticles(ex, ey, '#ef4444');
-                        const dummyDist = Math.hypot(GameManager.dummy.x - ex, GameManager.dummy.y - ey);
-                        if (dummyDist <= r + GameManager.dummy.radius) {
-                            GameManager.dummy.takeDamage(skill.baseDamage, skill.damageType);
+                ctx.groundAoes.push(new GroundAoeVisual(
+                    this.id, targetX, targetY, skill.radius, skill.delay,
+                    skill.baseDamage, skill.damageType, (aoe) => {
+                        const dist = Math.hypot(opponent.x - aoe.x, opponent.y - aoe.y);
+                        if (dist <= aoe.radius + opponent.radius) {
+                            opponent.takeDamage(aoe.damage, aoe.damageType);
                         }
-                    })
-                );
+                    }
+                ));
                 break;
             }
-
             case 'MELEE_SWEEP': {
-                GameManager.meleeSweeps.push(
-                    new MeleeSweepVisual(this.x, this.y, angle, skill.maxRange, skill.arcAngle, '#f97316')
-                );
-                this.checkSectorCollision(angle, skill.maxRange, skill.arcAngle, skill.baseDamage, skill.damageType);
+                ctx.meleeSweeps.push(new MeleeSweepVisual(
+                    this.x, this.y, this.aimAngle, skill.maxRange, skill.arcAngle, '#f97316'
+                ));
+                ctx.checkMeleeHit(this, this.aimAngle, skill.maxRange, skill.arcAngle, skill.baseDamage, skill.damageType);
                 break;
             }
-
             case 'DASH_COLLIDE': {
                 const clampedDist = Math.min(distToMouse, skill.maxRange);
                 const duration = clampedDist / skill.dashSpeed;
                 this.dashState = {
-                    vx: Math.cos(angle) * skill.dashSpeed,
-                    vy: Math.sin(angle) * skill.dashSpeed,
+                    vx: Math.cos(this.aimAngle) * skill.dashSpeed,
+                    vy: Math.sin(this.aimAngle) * skill.dashSpeed,
                     timeRemaining: duration,
                     damage: skill.baseDamage,
                     damageType: skill.damageType
@@ -507,54 +412,30 @@ class CombatPlayer {
                 break;
             }
         }
-
         this.skillCooldowns[index] = skill.cooldown;
     }
 
-    checkSectorCollision(angle, range, arcAngleDegrees, damage, damageType) {
-        const dummy = GameManager.dummy;
-        const dx = dummy.x - this.x;
-        const dy = dummy.y - this.y;
-        const distance = Math.hypot(dx, dy);
-
-        if (distance > range + dummy.radius) return;
-
-        const targetAngle = Math.atan2(dy, dx);
-        let angleDiff = targetAngle - angle;
-
-        // 正規化角度差至 [-PI, PI]
-        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-
-        const halfArc = ((arcAngleDegrees * Math.PI) / 180) / 2;
-        if (Math.abs(angleDiff) <= halfArc) {
-            dummy.takeDamage(damage, damageType);
-        }
-    }
-
-    draw(ctx, mouse) {
+    draw(ctx) {
         ctx.save();
-        const angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
-
         // 準星指示線
         ctx.strokeStyle = '#64748b';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(this.x, this.y);
-        ctx.lineTo(this.x + Math.cos(angle) * (this.radius + 12), this.y + Math.sin(angle) * (this.radius + 12));
+        ctx.lineTo(this.x + Math.cos(this.aimAngle) * (this.radius + 12), this.y + Math.sin(this.aimAngle) * (this.radius + 12));
         ctx.stroke();
 
-        // 護盾外環
+        // 護盾外圈
         if (this.shield > 0) {
             ctx.strokeStyle = '#38bdf8';
             ctx.lineWidth = 4;
             ctx.beginPath();
-            ctx.arc(this.x, this.y, this.radius + 6, 0, Math.PI * 2);
+            ctx.arc(this.x, this.y, this.radius + 5, 0, Math.PI * 2);
             ctx.stroke();
         }
 
         // 角色本體
-        ctx.fillStyle = this.loadout.coreId === 'STAR_WEAVER' ? '#38bdf8' : '#e2e8f0';
+        ctx.fillStyle = this.color;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fill();
@@ -566,116 +447,273 @@ class CombatPlayer {
 }
 
 /**
- * 遊戲主管理器 (統整實體生命週期與更新)
+ * 遊戲整體狀態與對戰管理系統
  */
 const GameManager = {
-    player: null,
-    dummy: null,
+    state: GAME_STATE.LOBBY,
+    p1: new NetworkPlayer('p1', 180, 270, '#38bdf8'),
+    p2: new NetworkPlayer('p2', 780, 270, '#f43f5e'),
     projectiles: [],
     meleeSweeps: [],
     groundAoes: [],
-    particles: [],
-    screenShake: 0,
-    currentLoadoutIndex: 0,
-    testLoadouts: [],
+    syncTimer: 0,
+
+    // 連線與準備標記
+    localReady: false,
+    remoteReady: false,
+    remoteInputs: { moveVec: { x: 0, y: 0 }, mouse: { x: 0, y: 0 }, triggers: {} },
 
     init() {
-        // 建構兩套驗證配置 (星軌編織者 vs 鋼鐵誓約)
-        this.testLoadouts = [
-            buildCombatLoadout('STAR_WEAVER', ['FLUX_HP_BOOST'], ['RHAP_TRIPLE_BOLT']),
-            buildCombatLoadout('IRON_OATH', ['FLUX_SWIFT_FOOT'], ['RHAP_COLOSSAL_CLEAVE'])
-        ];
-
-        this.dummy = new TargetDummy(720, 270);
-        this.player = new CombatPlayer(200, 270, this.testLoadouts[0]);
-
-        DOM.btnSwitchCore.addEventListener('click', () => this.toggleLoadout());
-        this.updateHUD();
+        Input.init(DOM.canvas);
+        this.setupLobbyEvents();
+        this.setupNetworkEvents();
     },
 
-    toggleLoadout() {
-        this.currentLoadoutIndex = (this.currentLoadoutIndex + 1) % this.testLoadouts.length;
-        this.player.setLoadout(this.testLoadouts[this.currentLoadoutIndex]);
-        this.updateHUD();
+    setupLobbyEvents() {
+        DOM.btnCreateRoom.addEventListener('click', async () => {
+            DOM.btnCreateRoom.disabled = true;
+            DOM.connectionStatus.textContent = '正在向信令伺服器註冊房間...';
+            try {
+                const id = await NetworkManager.init();
+                DOM.roomIdDisplay.textContent = `房間代碼：${id}`;
+                DOM.connectionStatus.textContent = '房間已建立，等待訪客連線...';
+            } catch (err) {
+                DOM.connectionStatus.textContent = '建立失敗，請檢查網路連線';
+                DOM.btnCreateRoom.disabled = false;
+            }
+        });
+
+        DOM.btnJoinRoom.addEventListener('click', async () => {
+            const targetId = DOM.inputRoomId.value.trim();
+            if (!targetId) return;
+            DOM.btnJoinRoom.disabled = true;
+            DOM.connectionStatus.textContent = '連線中...';
+            try {
+                await NetworkManager.init();
+                NetworkManager.joinRoom(targetId);
+            } catch (err) {
+                DOM.connectionStatus.textContent = '加入失敗';
+                DOM.btnJoinRoom.disabled = false;
+            }
+        });
+
+        DOM.btnReady.addEventListener('click', () => {
+            this.localReady = true;
+            DOM.btnReady.disabled = true;
+            DOM.readyStatus.textContent = '已鎖定配置，等待對手...';
+
+            const myLoadoutData = this.collectSelectedLoadout();
+            NetworkManager.send({
+                type: 'LOADOUT_READY',
+                loadout: myLoadoutData
+            });
+
+            if (NetworkManager.isHost) {
+                this.p1.applyLoadout(buildCombatLoadout(myLoadoutData.coreId, myLoadoutData.fluxIds, myLoadoutData.rhapsodyIds));
+            } else {
+                this.p2.applyLoadout(buildCombatLoadout(myLoadoutData.coreId, myLoadoutData.fluxIds, myLoadoutData.rhapsodyIds));
+            }
+
+            this.checkMatchStart();
+        });
     },
 
-    updateHUD() {
-        const loadout = this.player.loadout;
-        DOM.coreName.textContent = `當前核心：${loadout.name} [${loadout.basicAttack.attackType}]`;
-        for (let i = 0; i < 3; i++) {
-            DOM.nameSkills[i].textContent = loadout.skills[i] ? loadout.skills[i].name : '-';
+    setupNetworkEvents() {
+        NetworkManager.onConnected = (isHost) => {
+            this.state = GAME_STATE.LOADOUT;
+            DOM.connectionStatus.textContent = `連線成功！身分：${isHost ? '主機 (P1)' : '訪客 (P2)'}`;
+            DOM.loadoutSelection.classList.remove('hidden');
+        };
+
+        NetworkManager.onDataReceived = (pkg) => {
+            switch (pkg.type) {
+                case 'LOADOUT_READY': {
+                    this.remoteReady = true;
+                    if (NetworkManager.isHost) {
+                        this.p2.applyLoadout(buildCombatLoadout(pkg.loadout.coreId, pkg.loadout.fluxIds, pkg.loadout.rhapsodyIds));
+                    } else {
+                        this.p1.applyLoadout(buildCombatLoadout(pkg.loadout.coreId, pkg.loadout.fluxIds, pkg.loadout.rhapsodyIds));
+                    }
+                    this.checkMatchStart();
+                    break;
+                }
+                case 'START_GAME': {
+                    this.startGame();
+                    break;
+                }
+                case 'CLIENT_INPUT': {
+                    if (NetworkManager.isHost) {
+                        this.remoteInputs = pkg.input;
+                    }
+                    break;
+                }
+                case 'HOST_SNAPSHOT': {
+                    if (!NetworkManager.isHost) {
+                        this.applySnapshot(pkg.snapshot);
+                    }
+                    break;
+                }
+            }
+        };
+    },
+
+    collectSelectedLoadout() {
+        const coreId = DOM.selectCore.value;
+        const fluxIds = Array.from(DOM.fluxCheckboxes).filter(c => c.checked).map(c => c.value);
+        const rhapsodyIds = Array.from(DOM.rhapsodyCheckboxes).filter(c => c.checked).map(c => c.value);
+        return { coreId, fluxIds, rhapsodyIds };
+    },
+
+    checkMatchStart() {
+        if (this.localReady && this.remoteReady && NetworkManager.isHost) {
+            NetworkManager.send({ type: 'START_GAME' });
+            this.startGame();
         }
     },
 
-    triggerShake(amount) {
-        this.screenShake = amount;
+    startGame() {
+        this.state = GAME_STATE.IN_GAME;
+        DOM.lobbyPanel.classList.add('hidden');
+        DOM.battleContainer.classList.remove('hidden');
+
+        // 更新 HUD 名稱
+        const myPlayer = NetworkManager.isHost ? this.p1 : this.p2;
+        for (let i = 0; i < 3; i++) {
+            DOM.nameSkills[i].textContent = myPlayer.loadout.skills[i].name;
+        }
     },
 
-    spawnParticles(x, y, color) {
-        for (let i = 0; i < ENGINE_CONFIG.VFX.PARTICLE_COUNT; i++) {
-            this.particles.push(new Particle(x, y, color));
+    checkMeleeHit(attacker, angle, range, arcAngle, damage, damageType) {
+        const defender = attacker.id === 'p1' ? this.p2 : this.p1;
+        const dx = defender.x - attacker.x;
+        const dy = defender.y - attacker.y;
+        const distance = Math.hypot(dx, dy);
+
+        if (distance > range + defender.radius) return;
+
+        let angleDiff = Math.atan2(dy, dx) - angle;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+
+        if (Math.abs(angleDiff) <= ((arcAngle * Math.PI) / 180) / 2) {
+            defender.takeDamage(damage, damageType);
         }
     },
 
     update(dt) {
-        this.player.update(dt, Input);
+        if (this.state !== GAME_STATE.IN_GAME) return;
 
-        // 彈道更新與碰撞
-        for (let i = this.projectiles.length - 1; i >= 0; i--) {
-            const p = this.projectiles[i];
-            p.update(dt);
+        if (NetworkManager.isHost) {
+            // 主機負責運算全場實體
+            const p1Move = Input.getMovementVector();
+            this.p1.update(dt, p1Move, Input.mouse, Input.activeTriggers, this.p2, this);
+            Input.clearTriggers();
 
-            const dist = Math.hypot(p.x - this.dummy.x, p.y - this.dummy.y);
-            if (dist < p.radius + this.dummy.radius) {
-                p.isAlive = false;
-                this.dummy.takeDamage(p.damage, p.damageType);
+            this.p2.update(
+                dt,
+                this.remoteInputs.moveVec || { x: 0, y: 0 },
+                this.remoteInputs.mouse || { x: 0, y: 0 },
+                this.remoteInputs.triggers || {},
+                this.p1,
+                this
+            );
+            this.remoteInputs.triggers = {};
+
+            // 彈道更新與碰撞
+            for (let i = this.projectiles.length - 1; i >= 0; i--) {
+                const p = this.projectiles[i];
+                p.update(dt);
+                const target = p.ownerId === 'p1' ? this.p2 : this.p1;
+                if (Math.hypot(p.x - target.x, p.y - target.y) < p.radius + target.radius) {
+                    p.isAlive = false;
+                    target.takeDamage(p.damage, p.damageType);
+                }
+                if (!p.isAlive) this.projectiles.splice(i, 1);
             }
 
-            if (!p.isAlive) this.projectiles.splice(i, 1);
+            for (let i = this.meleeSweeps.length - 1; i >= 0; i--) {
+                this.meleeSweeps[i].update(dt);
+                if (this.meleeSweeps[i].life <= 0) this.meleeSweeps.splice(i, 1);
+            }
+
+            for (let i = this.groundAoes.length - 1; i >= 0; i--) {
+                this.groundAoes[i].update(dt);
+                if (!this.groundAoes[i].isAlive) this.groundAoes.splice(i, 1);
+            }
+
+            // 定頻向訪客廣播戰局快照 (30Hz)
+            this.syncTimer += dt;
+            if (this.syncTimer >= ENGINE_CONFIG.SYNC_RATE) {
+                this.syncTimer = 0;
+                NetworkManager.send({
+                    type: 'HOST_SNAPSHOT',
+                    snapshot: {
+                        p1: { x: this.p1.x, y: this.p1.y, hp: this.p1.hp, shield: this.p1.shield, aim: this.p1.aimAngle, cdAtk: this.p1.attackCooldown, cds: this.p1.skillCooldowns },
+                        p2: { x: this.p2.x, y: this.p2.y, hp: this.p2.hp, shield: this.p2.shield, aim: this.p2.aimAngle, cdAtk: this.p2.attackCooldown, cds: this.p2.skillCooldowns },
+                        projectiles: this.projectiles.map(p => ({ x: p.x, y: p.y, r: p.radius, c: p.color })),
+                        sweeps: this.meleeSweeps.map(s => ({ x: s.x, y: s.y, a: s.angle, r: s.range, arc: s.arcAngle, c: s.color, life: s.life })),
+                        aoes: this.groundAoes.map(a => ({ x: a.x, y: a.y, r: a.radius, delay: a.delay, total: a.totalDelay }))
+                    }
+                });
+            }
+        } else {
+            // 訪客端：採樣輸入並傳送至主機
+            NetworkManager.send({
+                type: 'CLIENT_INPUT',
+                input: {
+                    moveVec: Input.getMovementVector(),
+                    mouse: Input.mouse,
+                    triggers: { ...Input.activeTriggers }
+                }
+            });
+            Input.clearTriggers();
         }
 
-        // 近戰視覺更新
-        for (let i = this.meleeSweeps.length - 1; i >= 0; i--) {
-            this.meleeSweeps[i].update(dt);
-            if (this.meleeSweeps[i].life <= 0) this.meleeSweeps.splice(i, 1);
-        }
+        this.updateHUD();
+    },
 
-        // 地面 AOE 更新
-        for (let i = this.groundAoes.length - 1; i >= 0; i--) {
-            this.groundAoes[i].update(dt);
-            if (!this.groundAoes[i].isAlive) this.groundAoes.splice(i, 1);
-        }
+    applySnapshot(s) {
+        this.p1.x = s.p1.x; this.p1.y = s.p1.y; this.p1.hp = s.p1.hp; this.p1.shield = s.p1.shield; this.p1.aimAngle = s.p1.aim;
+        this.p2.x = s.p2.x; this.p2.y = s.p2.y; this.p2.hp = s.p2.hp; this.p2.shield = s.p2.shield; this.p2.aimAngle = s.p2.aim;
+        this.p2.attackCooldown = s.p2.cdAtk;
+        this.p2.skillCooldowns = s.p2.cds;
 
-        // 粒子更新
-        for (let i = this.particles.length - 1; i >= 0; i--) {
-            this.particles[i].update(dt);
-            if (this.particles[i].life <= 0) this.particles.splice(i, 1);
-        }
+        this.projectiles = s.projectiles.map(p => {
+            const inst = new Projectile('remote', p.x, p.y, 0, 0, p.r, 999, 0, '', p.c);
+            return inst;
+        });
 
-        // HUD 冷卻條即時更新
-        const atk = this.player.loadout.basicAttack;
-        DOM.cdAttack.style.height = `${(this.player.attackCooldown / atk.cooldown) * 100}%`;
+        this.meleeSweeps = s.sweeps.map(sw => {
+            const inst = new MeleeSweepVisual(sw.x, sw.y, sw.a, sw.r, (sw.arc * 180) / Math.PI, sw.c);
+            inst.life = sw.life;
+            return inst;
+        });
 
+        this.groundAoes = s.aoes.map(a => {
+            const inst = new GroundAoeVisual('remote', a.x, a.y, a.r, a.delay, 0, '', null);
+            inst.totalDelay = a.total;
+            return inst;
+        });
+    },
+
+    updateHUD() {
+        if (!this.p1.loadout || !this.p2.loadout) return;
+        DOM.p1Info.textContent = `P1 (${this.p1.loadout.name})：HP ${this.p1.hp}/${this.p1.loadout.stats.hpMax} ${this.p1.shield > 0 ? `[護盾: ${this.p1.shield}]` : ''}`;
+        DOM.p2Info.textContent = `P2 (${this.p2.loadout.name})：HP ${this.p2.hp}/${this.p2.loadout.stats.hpMax} ${this.p2.shield > 0 ? `[護盾: ${this.p2.shield}]` : ''}`;
+
+        const myPlayer = NetworkManager.isHost ? this.p1 : this.p2;
+        DOM.cdAttack.style.height = `${(myPlayer.attackCooldown / myPlayer.loadout.basicAttack.cooldown) * 100}%`;
         for (let i = 0; i < 3; i++) {
-            const maxCd = this.player.loadout.skills[i].cooldown;
-            const currentCd = this.player.skillCooldowns[i];
-            DOM.cdSkills[i].style.height = `${(currentCd / maxCd) * 100}%`;
+            DOM.cdSkills[i].style.height = `${(myPlayer.skillCooldowns[i] / myPlayer.loadout.skills[i].cooldown) * 100}%`;
         }
     },
 
     render() {
+        if (this.state !== GAME_STATE.IN_GAME) return;
         const ctx = DOM.ctx;
-        ctx.save();
-
-        if (this.screenShake > 0) {
-            ctx.translate((Math.random() - 0.5) * this.screenShake, (Math.random() - 0.5) * this.screenShake);
-            this.screenShake *= ENGINE_CONFIG.VFX.SCREEN_SHAKE_DECAY;
-            if (this.screenShake < 0.2) this.screenShake = 0;
-        }
-
         ctx.clearRect(0, 0, ENGINE_CONFIG.CANVAS.WIDTH, ENGINE_CONFIG.CANVAS.HEIGHT);
 
-        // 繪製背景格線
+        // 格線背景
         ctx.strokeStyle = ENGINE_CONFIG.CANVAS.GRID_COLOR;
         ctx.lineWidth = 1;
         for (let x = 0; x < ENGINE_CONFIG.CANVAS.WIDTH; x += ENGINE_CONFIG.CANVAS.GRID_SIZE) {
@@ -685,37 +723,28 @@ const GameManager = {
             ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(ENGINE_CONFIG.CANVAS.WIDTH, y); ctx.stroke();
         }
 
-        // 實體渲染
         this.groundAoes.forEach(a => a.draw(ctx));
-        this.dummy.draw(ctx);
-        this.player.draw(ctx, Input.mouse);
+        this.p1.draw(ctx);
+        this.p2.draw(ctx);
         this.projectiles.forEach(p => p.draw(ctx));
         this.meleeSweeps.forEach(s => s.draw(ctx));
-
-        // 粒子加色模式
-        ctx.globalCompositeOperation = 'lighter';
-        this.particles.forEach(p => p.draw(ctx));
-        ctx.globalCompositeOperation = 'source-over';
-
-        ctx.restore();
     }
 };
 
 /**
- * 引擎啟動迴圈
+ * 引擎主迴圈
  */
-let lastTime = 0;
-function engineLoop(timestamp) {
-    if (!lastTime) lastTime = timestamp;
-    const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
-    lastTime = timestamp;
+let lastTimestamp = 0;
+function mainLoop(timestamp) {
+    if (!lastTimestamp) lastTimestamp = timestamp;
+    const dt = Math.min((timestamp - lastTimestamp) / 1000, 0.1);
+    lastTimestamp = timestamp;
 
     GameManager.update(dt);
     GameManager.render();
 
-    requestAnimationFrame(engineLoop);
+    requestAnimationFrame(mainLoop);
 }
 
-Input.init(DOM.canvas);
 GameManager.init();
-requestAnimationFrame(engineLoop);
+requestAnimationFrame(mainLoop);
