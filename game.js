@@ -723,8 +723,8 @@ const GameManager = {
 
             const payload = {
                 coreId: this.selectedCoreId,
-                fluxIds: Array.from(this.selectedFluxIds),
-                rhapsodyIds: Array.from(this.selectedRhapsodyIds)
+                fluxIds: this.selectedFluxId ? [this.selectedFluxId] : [],
+                rhapsodyIds: this.selectedRhapsodyId ? [this.selectedRhapsodyId] : []
             };
 
             if (this.isPractice) {
