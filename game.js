@@ -1,3 +1,16 @@
+import { buildCombatLoadout } from './builder.js';
+
+// 測試案例：組裝星軌編織者 + 生命與速度天賦 + 三重彈道狂想
+const testLoadout = buildCombatLoadout(
+    'STAR_WEAVER',
+    ['FLUX_HP_BOOST', 'FLUX_SWIFT_FOOT'],
+    ['RHAP_TRIPLE_BOLT']
+);
+
+console.log('--- 實體建構測試 ---');
+console.log('計算後 HP (預期 200 + 50 = 250):', testLoadout.stats.hpMax);
+console.log('計算後移速 (預期 100 * 1.15 = 115):', testLoadout.stats.moveSpeed);
+console.log('技能 1 狂想變形 (預期彈道數 3, 傷害 28):', testLoadout.skills[0]);
 /**
  * 核心設定常數 (避免硬編碼)
  */
