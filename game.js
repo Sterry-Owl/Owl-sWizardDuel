@@ -1,93 +1,81 @@
+import { ATTACK_TYPE, DAMAGE_TYPE } from './definitions.js';
 import { buildCombatLoadout } from './builder.js';
 
-// 測試案例：組裝星軌編織者 + 生命與速度天賦 + 三重彈道狂想
-const testLoadout = buildCombatLoadout(
-    'STAR_WEAVER',
-    ['FLUX_HP_BOOST', 'FLUX_SWIFT_FOOT'],
-    ['RHAP_TRIPLE_BOLT']
-);
-
-console.log('--- 實體建構測試 ---');
-console.log('計算後 HP (預期 200 + 50 = 250):', testLoadout.stats.hpMax);
-console.log('計算後移速 (預期 100 * 1.15 = 115):', testLoadout.stats.moveSpeed);
-console.log('技能 1 狂想變形 (預期彈道數 3, 傷害 28):', testLoadout.skills[0]);
 /**
- * 核心設定常數 (避免硬編碼)
+ * 引擎常數定義
  */
-const CONFIG = {
+const ENGINE_CONFIG = {
     CANVAS: {
         WIDTH: 960,
         HEIGHT: 540,
         GRID_SIZE: 40,
-        BG_COLOR: '#1a1c23',
         GRID_COLOR: '#232733'
     },
-    PLAYER: {
-        RADIUS: 18,
-        // 原速度 3.375 px/幀 (60 FPS 下為 202.5 px/s)，折半後為 101.25 px/s
-        SPEED: 101.25,
-        COLOR: '#38bdf8',
-        BARREL_COLOR: '#94a3b8',
-        BARREL_LENGTH: 10,
-        // 普攻發射間隔：每 2 秒 1 發
-        ATTACK_COOLDOWN: 2.0
-    },
-    SPELL: {
-        RADIUS: 8,
-        // 保持原設定之 3.6 px/幀 (60 FPS 下為 216 px/s)
-        SPEED: 216,
-        COLOR_INNER: '#ffffff',
-        COLOR_MID: '#fb923c',
-        COLOR_OUTER: '#ef4444'
-    },
-    DUMMY: {
-        RADIUS: 26,
-        MAX_HP: 200,
-        COLOR: '#f43f5e',
-        DAMAGE_TAKEN: 20
-    },
-    PARTICLE: {
-        COUNT: 15,
-        DECAY_MIN: 0.02,
-        DECAY_MAX: 0.05,
-        SPEED_MIN: 120,
-        SPEED_MAX: 480
-    },
-    EFFECTS: {
-        SCREEN_SHAKE_INTENSITY: 6,
-        SCREEN_SHAKE_DECAY: 0.85
+    VFX: {
+        SCREEN_SHAKE_DECAY: 0.85,
+        PARTICLE_COUNT: 12
     }
 };
 
 /**
- * 系統初始化
+ * DOM 節點快取
  */
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const statusText = document.getElementById('status-text');
-
-let lastTimestamp = 0;
-let screenShake = 0;
+const DOM = {
+    canvas: document.getElementById('gameCanvas'),
+    ctx: document.getElementById('gameCanvas').getContext('2d'),
+    coreName: document.getElementById('core-name'),
+    dummyStatus: document.getElementById('dummy-status'),
+    btnSwitchCore: document.getElementById('btn-switch-core'),
+    cdAttack: document.getElementById('cd-attack'),
+    cdSkills: [
+        document.getElementById('cd-skill-1'),
+        document.getElementById('cd-skill-2'),
+        document.getElementById('cd-skill-3')
+    ],
+    nameSkills: [
+        document.getElementById('name-skill-1'),
+        document.getElementById('name-skill-2'),
+        document.getElementById('name-skill-3')
+    ]
+};
 
 /**
  * 輸入監聽模組
  */
-const InputController = {
-    keys: { w: false, a: false, s: false, d: false },
+const Input = {
+    keys: {},
     mouse: { x: 0, y: 0, isDown: false },
+    activeTriggers: { attack: false, skill1: false, skill2: false, skill3: false },
 
-    init(targetCanvas) {
-        window.addEventListener('keydown', (e) => this.setKey(e.key.toLowerCase(), true));
-        window.addEventListener('keyup', (e) => this.setKey(e.key.toLowerCase(), false));
-        
-        targetCanvas.addEventListener('mousemove', (e) => {
-            const rect = targetCanvas.getBoundingClientRect();
+    init(canvasElement) {
+        window.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            this.keys[key] = true;
+
+            if (key === 'q' || key === '1') this.activeTriggers.skill1 = true;
+            if (key === 'w' || key === '2') this.activeTriggers.skill2 = true;
+            if (key === 'e' || key === '3') this.activeTriggers.skill3 = true;
+            if (key === 'tab') {
+                e.preventDefault();
+                GameManager.toggleLoadout();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            this.keys[e.key.toLowerCase()] = false;
+        });
+
+        canvasElement.addEventListener('mousemove', (e) => {
+            const rect = canvasElement.getBoundingClientRect();
             this.mouse.x = e.clientX - rect.left;
             this.mouse.y = e.clientY - rect.top;
         });
 
-        targetCanvas.addEventListener('mousedown', (e) => {
-            if (e.button === 0) this.mouse.isDown = true;
+        canvasElement.addEventListener('mousedown', (e) => {
+            if (e.button === 0) {
+                this.mouse.isDown = true;
+                this.activeTriggers.attack = true;
+            }
         });
 
         window.addEventListener('mouseup', (e) => {
@@ -95,19 +83,13 @@ const InputController = {
         });
     },
 
-    setKey(key, state) {
-        if (Object.prototype.hasOwnProperty.call(this.keys, key)) {
-            this.keys[key] = state;
-        }
-    },
-
     getMovementVector() {
         let dx = 0;
         let dy = 0;
-        if (this.keys.w) dy -= 1;
-        if (this.keys.s) dy += 1;
-        if (this.keys.a) dx -= 1;
-        if (this.keys.d) dx += 1;
+        if (this.keys['w']) dy -= 1;
+        if (this.keys['s']) dy += 1;
+        if (this.keys['a']) dx -= 1;
+        if (this.keys['d']) dx += 1;
 
         if (dx !== 0 && dy !== 0) {
             dx *= 0.70710678;
@@ -118,7 +100,22 @@ const InputController = {
 };
 
 /**
- * 粒子實體類別
+ * 傷害計算管線
+ */
+const DamageCalculator = {
+    calculateDamage(attackerDamage, damageType, defenderStats) {
+        let reduction = 0;
+        if (damageType === DAMAGE_TYPE.PHYSICAL) {
+            reduction = defenderStats.physDef / (100 + defenderStats.physDef);
+        } else if (damageType === DAMAGE_TYPE.MAGIC) {
+            reduction = defenderStats.magicRes / (100 + defenderStats.magicRes);
+        }
+        return Math.max(1, Math.round(attackerDamage * (1 - reduction)));
+    }
+};
+
+/**
+ * 粒子與視覺特效系統
  */
 class Particle {
     constructor(x, y, color) {
@@ -126,22 +123,18 @@ class Particle {
         this.y = y;
         this.color = color;
         this.radius = Math.random() * 3 + 2;
-        
         const angle = Math.random() * Math.PI * 2;
-        const speed = Math.random() * (CONFIG.PARTICLE.SPEED_MAX - CONFIG.PARTICLE.SPEED_MIN) + CONFIG.PARTICLE.SPEED_MIN;
+        const speed = Math.random() * 200 + 50;
         this.vx = Math.cos(angle) * speed;
         this.vy = Math.sin(angle) * speed;
-        
         this.life = 1.0;
-        this.decay = Math.random() * (CONFIG.PARTICLE.DECAY_MAX - CONFIG.PARTICLE.DECAY_MIN) + CONFIG.PARTICLE.DECAY_MIN;
+        this.decay = Math.random() * 2.0 + 1.0;
     }
 
     update(dt) {
         this.x += this.vx * dt;
         this.y += this.vy * dt;
-        this.vx *= Math.pow(0.05, dt);
-        this.vy *= Math.pow(0.05, dt);
-        this.life -= this.decay * (dt * 60);
+        this.life -= this.decay * dt;
     }
 
     draw(ctx) {
@@ -156,37 +149,119 @@ class Particle {
 }
 
 /**
- * 普攻彈道類別
+ * 近戰扇形揮擊視覺與判定實體
  */
-class Spell {
-    constructor(x, y, targetX, targetY) {
+class MeleeSweepVisual {
+    constructor(x, y, angle, range, arcAngle, color) {
         this.x = x;
         this.y = y;
-        this.radius = CONFIG.SPELL.RADIUS;
-        this.speed = CONFIG.SPELL.SPEED;
-        this.isAlive = true;
-
-        const angle = Math.atan2(targetY - y, targetX - x);
-        this.vx = Math.cos(angle) * this.speed;
-        this.vy = Math.sin(angle) * this.speed;
+        this.angle = angle;
+        this.range = range;
+        this.arcAngle = (arcAngle * Math.PI) / 180;
+        this.color = color;
+        this.life = 0.15;
+        this.totalLife = 0.15;
     }
 
     update(dt) {
+        this.life -= dt;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.life / this.totalLife);
+        ctx.strokeStyle = this.color;
+        ctx.fillStyle = this.color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.arc(
+            this.x,
+            this.y,
+            this.range,
+            this.angle - this.arcAngle / 2,
+            this.angle + this.arcAngle / 2
+        );
+        ctx.closePath();
+        ctx.stroke();
+        ctx.globalAlpha *= 0.25;
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+/**
+ * 地面延遲範圍傷害實體 (Ground AOE)
+ */
+class GroundAoeVisual {
+    constructor(x, y, radius, delay, onExplode) {
+        this.x = x;
+        this.y = y;
+        this.radius = radius;
+        this.delay = delay;
+        this.totalDelay = delay;
+        this.onExplode = onExplode;
+        this.isAlive = true;
+    }
+
+    update(dt) {
+        this.delay -= dt;
+        if (this.delay <= 0) {
+            this.isAlive = false;
+            this.onExplode(this.x, this.y, this.radius);
+        }
+    }
+
+    draw(ctx) {
+        ctx.save();
+        const progress = 1 - Math.max(0, this.delay / this.totalDelay);
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * progress, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+/**
+ * 彈道飛行實體
+ */
+class Projectile {
+    constructor(x, y, angle, speed, radius, maxRange, damage, damageType, color) {
+        this.x = x;
+        this.y = y;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.radius = radius;
+        this.damage = damage;
+        this.damageType = damageType;
+        this.color = color;
+        this.remainingDistance = maxRange;
+        this.isAlive = true;
+    }
+
+    update(dt) {
+        const step = Math.hypot(this.vx * dt, this.vy * dt);
         this.x += this.vx * dt;
         this.y += this.vy * dt;
+        this.remainingDistance -= step;
 
-        if (this.x < 0 || this.x > canvas.width || this.y < 0 || this.y > canvas.height) {
+        if (this.remainingDistance <= 0 || 
+            this.x < 0 || this.x > ENGINE_CONFIG.CANVAS.WIDTH || 
+            this.y < 0 || this.y > ENGINE_CONFIG.CANVAS.HEIGHT) {
             this.isAlive = false;
         }
     }
 
     draw(ctx) {
         ctx.save();
-        const gradient = ctx.createRadialGradient(this.x, this.y, 2, this.x, this.y, this.radius);
-        gradient.addColorStop(0, CONFIG.SPELL.COLOR_INNER);
-        gradient.addColorStop(0.4, CONFIG.SPELL.COLOR_MID);
-        gradient.addColorStop(1, CONFIG.SPELL.COLOR_OUTER);
-        ctx.fillStyle = gradient;
+        ctx.fillStyle = this.color;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fill();
@@ -195,54 +270,291 @@ class Spell {
 }
 
 /**
- * 玩家模組
+ * 測試假人實體
  */
-const player = {
-    x: 180,
-    y: 270,
-    radius: CONFIG.PLAYER.RADIUS,
-    speed: CONFIG.PLAYER.SPEED,
-    color: CONFIG.PLAYER.COLOR,
-    cooldownTimer: 0,
+class TargetDummy {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 24;
+        this.stats = {
+            hpMax: 1000,
+            physDef: 10,
+            magicRes: 10
+        };
+        this.currentHp = this.stats.hpMax;
+    }
 
-    update(dt, input, onShoot) {
-        const moveVec = input.getMovementVector();
-        this.x += moveVec.x * this.speed * dt;
-        this.y += moveVec.y * this.speed * dt;
+    takeDamage(amount, damageType) {
+        const actualDamage = DamageCalculator.calculateDamage(amount, damageType, this.stats);
+        this.currentHp = Math.max(0, this.currentHp - actualDamage);
+        GameManager.triggerShake(4);
+        GameManager.spawnParticles(this.x, this.y, damageType === DAMAGE_TYPE.PHYSICAL ? '#f59e0b' : '#38bdf8');
 
-        // 邊界防禦判定
-        this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x));
-        this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y));
+        if (this.currentHp <= 0) {
+            this.currentHp = this.stats.hpMax;
+        }
+        DOM.dummyStatus.textContent = `測試假人：HP ${this.currentHp}/${this.stats.hpMax} (物防 ${this.stats.physDef} / 魔抗 ${this.stats.magicRes}) - 受傷 ${actualDamage}`;
+    }
 
-        // 冷卻計時器遞減
-        if (this.cooldownTimer > 0) {
-            this.cooldownTimer = Math.max(0, this.cooldownTimer - dt);
+    draw(ctx) {
+        ctx.save();
+        ctx.fillStyle = '#f43f5e';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+
+        const barW = 60;
+        const barH = 6;
+        const hpRate = this.currentHp / this.stats.hpMax;
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(this.x - barW / 2, this.y - this.radius - 14, barW, barH);
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(this.x - barW / 2, this.y - this.radius - 14, barW * hpRate, barH);
+        ctx.restore();
+    }
+}
+
+/**
+ * 玩家戰鬥實體
+ */
+class CombatPlayer {
+    constructor(x, y, loadout) {
+        this.x = x;
+        this.y = y;
+        this.radius = 18;
+        this.loadout = loadout;
+
+        this.currentHp = loadout.stats.hpMax;
+        this.shield = 0;
+        this.damageReduction = 0;
+
+        // 冷卻計時器
+        this.attackCooldown = 0;
+        this.skillCooldowns = [0, 0, 0];
+
+        // 衝鋒狀態
+        this.dashState = null;
+    }
+
+    setLoadout(newLoadout) {
+        this.loadout = newLoadout;
+        this.currentHp = newLoadout.stats.hpMax;
+        this.shield = 0;
+        this.damageReduction = 0;
+        this.attackCooldown = 0;
+        this.skillCooldowns = [0, 0, 0];
+        this.dashState = null;
+    }
+
+    update(dt, input) {
+        // 衝鋒中優先處理位移
+        if (this.dashState) {
+            this.dashState.timeRemaining -= dt;
+            this.x += this.dashState.vx * dt;
+            this.y += this.dashState.vy * dt;
+
+            // 衝鋒碰撞判定
+            const dist = Math.hypot(this.x - GameManager.dummy.x, this.y - GameManager.dummy.y);
+            if (dist < this.radius + GameManager.dummy.radius) {
+                GameManager.dummy.takeDamage(this.dashState.damage, this.dashState.damageType);
+                this.dashState = null;
+            } else if (this.dashState.timeRemaining <= 0) {
+                this.dashState = null;
+            }
+        } else {
+            const moveVec = input.getMovementVector();
+            this.x += moveVec.x * this.loadout.stats.moveSpeed * dt;
+            this.y += moveVec.y * this.loadout.stats.moveSpeed * dt;
         }
 
-        // 發射判定
-        if (input.mouse.isDown && this.cooldownTimer === 0) {
-            onShoot(this.x, this.y, input.mouse.x, input.mouse.y);
-            this.cooldownTimer = CONFIG.PLAYER.ATTACK_COOLDOWN;
+        // 邊界防禦
+        this.x = Math.max(this.radius, Math.min(ENGINE_CONFIG.CANVAS.WIDTH - this.radius, this.x));
+        this.y = Math.max(this.radius, Math.min(ENGINE_CONFIG.CANVAS.HEIGHT - this.radius, this.y));
+
+        // 冷卻時間遞減
+        if (this.attackCooldown > 0) {
+            this.attackCooldown = Math.max(0, this.attackCooldown - dt);
         }
-    },
+        for (let i = 0; i < this.skillCooldowns.length; i++) {
+            if (this.skillCooldowns[i] > 0) {
+                this.skillCooldowns[i] = Math.max(0, this.skillCooldowns[i] - dt);
+            }
+        }
+
+        // 指令輸入判定
+        if (input.activeTriggers.attack) {
+            this.executeBasicAttack(input.mouse);
+            input.activeTriggers.attack = false;
+        }
+        if (input.activeTriggers.skill1) {
+            this.executeSkill(0, input.mouse);
+            input.activeTriggers.skill1 = false;
+        }
+        if (input.activeTriggers.skill2) {
+            this.executeSkill(1, input.mouse);
+            input.activeTriggers.skill2 = false;
+        }
+        if (input.activeTriggers.skill3) {
+            this.executeSkill(2, input.mouse);
+            input.activeTriggers.skill3 = false;
+        }
+    }
+
+    executeBasicAttack(mouse) {
+        if (this.attackCooldown > 0) return;
+        const atk = this.loadout.basicAttack;
+        const angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+
+        if (atk.attackType === ATTACK_TYPE.RANGED) {
+            GameManager.projectiles.push(
+                new Projectile(
+                    this.x, this.y, angle, atk.speed, atk.radius,
+                    atk.maxRange, atk.damage, atk.damageType, '#38bdf8'
+                )
+            );
+        } else if (atk.attackType === ATTACK_TYPE.MELEE) {
+            GameManager.meleeSweeps.push(
+                new MeleeSweepVisual(this.x, this.y, angle, atk.maxRange, atk.swingAngle, '#fbbf24')
+            );
+            this.checkSectorCollision(angle, atk.maxRange, atk.swingAngle, atk.damage, atk.damageType);
+        }
+
+        this.attackCooldown = atk.cooldown;
+    }
+
+    executeSkill(index, mouse) {
+        if (this.skillCooldowns[index] > 0) return;
+        const skill = this.loadout.skills[index];
+        if (!skill) return;
+
+        const angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+        const distToMouse = Math.hypot(mouse.x - this.x, mouse.y - this.y);
+
+        switch (skill.mechanic) {
+            case 'PROJECTILE_STRAIGHT': {
+                const count = skill.projectileCount || 1;
+                const spread = ((skill.spreadAngle || 0) * Math.PI) / 180;
+                const startAngle = angle - spread / 2;
+                const angleStep = count > 1 ? spread / (count - 1) : 0;
+
+                for (let i = 0; i < count; i++) {
+                    const currentAngle = count === 1 ? angle : startAngle + angleStep * i;
+                    GameManager.projectiles.push(
+                        new Projectile(
+                            this.x, this.y, currentAngle, skill.projectileSpeed,
+                            skill.radius, skill.maxRange, skill.baseDamage,
+                            skill.damageType, '#818cf8'
+                        )
+                    );
+                }
+                break;
+            }
+
+            case 'SELF_BUFF': {
+                if (skill.shieldValue) {
+                    this.shield = skill.shieldValue;
+                    setTimeout(() => { this.shield = 0; }, skill.duration * 1000);
+                }
+                if (skill.damageReduction) {
+                    this.damageReduction = skill.damageReduction;
+                    setTimeout(() => { this.damageReduction = 0; }, skill.duration * 1000);
+                }
+                GameManager.spawnParticles(this.x, this.y, '#38bdf8');
+                break;
+            }
+
+            case 'GROUND_AOE': {
+                // 最大施法射程限制
+                const clampedDist = Math.min(distToMouse, skill.maxRange);
+                const targetX = this.x + Math.cos(angle) * clampedDist;
+                const targetY = this.y + Math.sin(angle) * clampedDist;
+
+                GameManager.groundAoes.push(
+                    new GroundAoeVisual(targetX, targetY, skill.radius, skill.delay, (ex, ey, r) => {
+                        GameManager.triggerShake(8);
+                        GameManager.spawnParticles(ex, ey, '#ef4444');
+                        const dummyDist = Math.hypot(GameManager.dummy.x - ex, GameManager.dummy.y - ey);
+                        if (dummyDist <= r + GameManager.dummy.radius) {
+                            GameManager.dummy.takeDamage(skill.baseDamage, skill.damageType);
+                        }
+                    })
+                );
+                break;
+            }
+
+            case 'MELEE_SWEEP': {
+                GameManager.meleeSweeps.push(
+                    new MeleeSweepVisual(this.x, this.y, angle, skill.maxRange, skill.arcAngle, '#f97316')
+                );
+                this.checkSectorCollision(angle, skill.maxRange, skill.arcAngle, skill.baseDamage, skill.damageType);
+                break;
+            }
+
+            case 'DASH_COLLIDE': {
+                const clampedDist = Math.min(distToMouse, skill.maxRange);
+                const duration = clampedDist / skill.dashSpeed;
+                this.dashState = {
+                    vx: Math.cos(angle) * skill.dashSpeed,
+                    vy: Math.sin(angle) * skill.dashSpeed,
+                    timeRemaining: duration,
+                    damage: skill.baseDamage,
+                    damageType: skill.damageType
+                };
+                break;
+            }
+        }
+
+        this.skillCooldowns[index] = skill.cooldown;
+    }
+
+    checkSectorCollision(angle, range, arcAngleDegrees, damage, damageType) {
+        const dummy = GameManager.dummy;
+        const dx = dummy.x - this.x;
+        const dy = dummy.y - this.y;
+        const distance = Math.hypot(dx, dy);
+
+        if (distance > range + dummy.radius) return;
+
+        const targetAngle = Math.atan2(dy, dx);
+        let angleDiff = targetAngle - angle;
+
+        // 正規化角度差至 [-PI, PI]
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+
+        const halfArc = ((arcAngleDegrees * Math.PI) / 180) / 2;
+        if (Math.abs(angleDiff) <= halfArc) {
+            dummy.takeDamage(damage, damageType);
+        }
+    }
 
     draw(ctx, mouse) {
         ctx.save();
         const angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
-        
-        // 方向標線
-        ctx.strokeStyle = CONFIG.PLAYER.BARREL_COLOR;
-        ctx.lineWidth = 4;
+
+        // 準星指示線
+        ctx.strokeStyle = '#64748b';
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(this.x, this.y);
-        ctx.lineTo(
-            this.x + Math.cos(angle) * (this.radius + CONFIG.PLAYER.BARREL_LENGTH),
-            this.y + Math.sin(angle) * (this.radius + CONFIG.PLAYER.BARREL_LENGTH)
-        );
+        ctx.lineTo(this.x + Math.cos(angle) * (this.radius + 12), this.y + Math.sin(angle) * (this.radius + 12));
         ctx.stroke();
 
-        // 玩家本體
-        ctx.fillStyle = this.color;
+        // 護盾外環
+        if (this.shield > 0) {
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius + 6, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // 角色本體
+        ctx.fillStyle = this.loadout.coreId === 'STAR_WEAVER' ? '#38bdf8' : '#e2e8f0';
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fill();
@@ -251,150 +563,159 @@ const player = {
         ctx.stroke();
         ctx.restore();
     }
-};
+}
 
 /**
- * 靶子模組
+ * 遊戲主管理器 (統整實體生命週期與更新)
  */
-const dummy = {
-    x: 750,
-    y: 270,
-    radius: CONFIG.DUMMY.RADIUS,
-    maxHp: CONFIG.DUMMY.MAX_HP,
-    currentHp: CONFIG.DUMMY.MAX_HP,
-    color: CONFIG.DUMMY.COLOR,
+const GameManager = {
+    player: null,
+    dummy: null,
+    projectiles: [],
+    meleeSweeps: [],
+    groundAoes: [],
+    particles: [],
+    screenShake: 0,
+    currentLoadoutIndex: 0,
+    testLoadouts: [],
 
-    takeDamage(amount) {
-        this.currentHp = Math.max(0, this.currentHp - amount);
-        const percent = Math.floor((this.currentHp / this.maxHp) * 100);
-        statusText.textContent = `假人血量：${percent}%`;
-        if (this.currentHp === 0) {
-            this.currentHp = this.maxHp;
-            statusText.textContent = `假人血量：100% (已重置)`;
+    init() {
+        // 建構兩套驗證配置 (星軌編織者 vs 鋼鐵誓約)
+        this.testLoadouts = [
+            buildCombatLoadout('STAR_WEAVER', ['FLUX_HP_BOOST'], ['RHAP_TRIPLE_BOLT']),
+            buildCombatLoadout('IRON_OATH', ['FLUX_SWIFT_FOOT'], ['RHAP_COLOSSAL_CLEAVE'])
+        ];
+
+        this.dummy = new TargetDummy(720, 270);
+        this.player = new CombatPlayer(200, 270, this.testLoadouts[0]);
+
+        DOM.btnSwitchCore.addEventListener('click', () => this.toggleLoadout());
+        this.updateHUD();
+    },
+
+    toggleLoadout() {
+        this.currentLoadoutIndex = (this.currentLoadoutIndex + 1) % this.testLoadouts.length;
+        this.player.setLoadout(this.testLoadouts[this.currentLoadoutIndex]);
+        this.updateHUD();
+    },
+
+    updateHUD() {
+        const loadout = this.player.loadout;
+        DOM.coreName.textContent = `當前核心：${loadout.name} [${loadout.basicAttack.attackType}]`;
+        for (let i = 0; i < 3; i++) {
+            DOM.nameSkills[i].textContent = loadout.skills[i] ? loadout.skills[i].name : '-';
         }
     },
 
-    draw(ctx) {
-        ctx.save();
-        ctx.fillStyle = this.color;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#ffffff';
-        ctx.stroke();
+    triggerShake(amount) {
+        this.screenShake = amount;
+    },
 
-        // 血量條渲染
-        const barWidth = 50;
-        const barHeight = 6;
-        const hpRate = this.currentHp / this.maxHp;
-        ctx.fillStyle = '#334155';
-        ctx.fillRect(this.x - barWidth / 2, this.y - this.radius - 14, barWidth, barHeight);
-        ctx.fillStyle = '#22c55e';
-        ctx.fillRect(this.x - barWidth / 2, this.y - this.radius - 14, barWidth * hpRate, barHeight);
+    spawnParticles(x, y, color) {
+        for (let i = 0; i < ENGINE_CONFIG.VFX.PARTICLE_COUNT; i++) {
+            this.particles.push(new Particle(x, y, color));
+        }
+    },
+
+    update(dt) {
+        this.player.update(dt, Input);
+
+        // 彈道更新與碰撞
+        for (let i = this.projectiles.length - 1; i >= 0; i--) {
+            const p = this.projectiles[i];
+            p.update(dt);
+
+            const dist = Math.hypot(p.x - this.dummy.x, p.y - this.dummy.y);
+            if (dist < p.radius + this.dummy.radius) {
+                p.isAlive = false;
+                this.dummy.takeDamage(p.damage, p.damageType);
+            }
+
+            if (!p.isAlive) this.projectiles.splice(i, 1);
+        }
+
+        // 近戰視覺更新
+        for (let i = this.meleeSweeps.length - 1; i >= 0; i--) {
+            this.meleeSweeps[i].update(dt);
+            if (this.meleeSweeps[i].life <= 0) this.meleeSweeps.splice(i, 1);
+        }
+
+        // 地面 AOE 更新
+        for (let i = this.groundAoes.length - 1; i >= 0; i--) {
+            this.groundAoes[i].update(dt);
+            if (!this.groundAoes[i].isAlive) this.groundAoes.splice(i, 1);
+        }
+
+        // 粒子更新
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            this.particles[i].update(dt);
+            if (this.particles[i].life <= 0) this.particles.splice(i, 1);
+        }
+
+        // HUD 冷卻條即時更新
+        const atk = this.player.loadout.basicAttack;
+        DOM.cdAttack.style.height = `${(this.player.attackCooldown / atk.cooldown) * 100}%`;
+
+        for (let i = 0; i < 3; i++) {
+            const maxCd = this.player.loadout.skills[i].cooldown;
+            const currentCd = this.player.skillCooldowns[i];
+            DOM.cdSkills[i].style.height = `${(currentCd / maxCd) * 100}%`;
+        }
+    },
+
+    render() {
+        const ctx = DOM.ctx;
+        ctx.save();
+
+        if (this.screenShake > 0) {
+            ctx.translate((Math.random() - 0.5) * this.screenShake, (Math.random() - 0.5) * this.screenShake);
+            this.screenShake *= ENGINE_CONFIG.VFX.SCREEN_SHAKE_DECAY;
+            if (this.screenShake < 0.2) this.screenShake = 0;
+        }
+
+        ctx.clearRect(0, 0, ENGINE_CONFIG.CANVAS.WIDTH, ENGINE_CONFIG.CANVAS.HEIGHT);
+
+        // 繪製背景格線
+        ctx.strokeStyle = ENGINE_CONFIG.CANVAS.GRID_COLOR;
+        ctx.lineWidth = 1;
+        for (let x = 0; x < ENGINE_CONFIG.CANVAS.WIDTH; x += ENGINE_CONFIG.CANVAS.GRID_SIZE) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ENGINE_CONFIG.CANVAS.HEIGHT); ctx.stroke();
+        }
+        for (let y = 0; y < ENGINE_CONFIG.CANVAS.HEIGHT; y += ENGINE_CONFIG.CANVAS.GRID_SIZE) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(ENGINE_CONFIG.CANVAS.WIDTH, y); ctx.stroke();
+        }
+
+        // 實體渲染
+        this.groundAoes.forEach(a => a.draw(ctx));
+        this.dummy.draw(ctx);
+        this.player.draw(ctx, Input.mouse);
+        this.projectiles.forEach(p => p.draw(ctx));
+        this.meleeSweeps.forEach(s => s.draw(ctx));
+
+        // 粒子加色模式
+        ctx.globalCompositeOperation = 'lighter';
+        this.particles.forEach(p => p.draw(ctx));
+        ctx.globalCompositeOperation = 'source-over';
+
         ctx.restore();
     }
 };
 
 /**
- * 遊戲管理器與實體容器
+ * 引擎啟動迴圈
  */
-const spells = [];
-const particles = [];
+let lastTime = 0;
+function engineLoop(timestamp) {
+    if (!lastTime) lastTime = timestamp;
+    const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+    lastTime = timestamp;
 
-function spawnParticles(x, y) {
-    for (let p = 0; p < CONFIG.PARTICLE.COUNT; p++) {
-        const color = Math.random() < 0.5 ? '#f97316' : '#facc15';
-        particles.push(new Particle(x, y, color));
-    }
+    GameManager.update(dt);
+    GameManager.render();
+
+    requestAnimationFrame(engineLoop);
 }
 
-function handleCollisions() {
-    for (let i = spells.length - 1; i >= 0; i--) {
-        const spell = spells[i];
-        const dist = Math.hypot(spell.x - dummy.x, spell.y - dummy.y);
-
-        if (dist < spell.radius + dummy.radius) {
-            spell.isAlive = false;
-            dummy.takeDamage(CONFIG.DUMMY.DAMAGE_TAKEN);
-            screenShake = CONFIG.EFFECTS.SCREEN_SHAKE_INTENSITY;
-            spawnParticles(spell.x, spell.y);
-        }
-
-        if (!spell.isAlive) {
-            spells.splice(i, 1);
-        }
-    }
-}
-
-function renderBackground() {
-    ctx.strokeStyle = CONFIG.CANVAS.GRID_COLOR;
-    ctx.lineWidth = 1;
-    for (let x = 0; x < canvas.width; x += CONFIG.CANVAS.GRID_SIZE) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-    }
-    for (let y = 0; y < canvas.height; y += CONFIG.CANVAS.GRID_SIZE) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
-    }
-}
-
-/**
- * 主循環 (基於 Delta Time 控制)
- */
-function gameLoop(timestamp) {
-    if (!lastTimestamp) lastTimestamp = timestamp;
-    const dt = Math.min((timestamp - lastTimestamp) / 1000, 0.1); // 限制上限以防止分頁切換引發穿牆
-    lastTimestamp = timestamp;
-
-    // 1. 邏輯更新
-    player.update(dt, InputController, (x, y, tx, ty) => {
-        spells.push(new Spell(x, y, tx, ty));
-    });
-
-    spells.forEach(s => s.update(dt));
-    handleCollisions();
-
-    for (let i = particles.length - 1; i >= 0; i--) {
-        particles[i].update(dt);
-        if (particles[i].life <= 0) {
-            particles.splice(i, 1);
-        }
-    }
-
-    // 2. 畫面繪製
-    ctx.save();
-
-    if (screenShake > 0) {
-        const offsetX = (Math.random() - 0.5) * screenShake;
-        const offsetY = (Math.random() - 0.5) * screenShake;
-        ctx.translate(offsetX, offsetY);
-        screenShake *= Math.pow(CONFIG.EFFECTS.SCREEN_SHAKE_DECAY, dt * 60);
-        if (screenShake < 0.2) screenShake = 0;
-    }
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    renderBackground();
-
-    dummy.draw(ctx);
-    player.draw(ctx, InputController.mouse);
-    spells.forEach(s => s.draw(ctx));
-
-    // 粒子光暈加色渲染
-    ctx.globalCompositeOperation = 'lighter';
-    particles.forEach(p => p.draw(ctx));
-    ctx.globalCompositeOperation = 'source-over';
-
-    ctx.restore();
-
-    requestAnimationFrame(gameLoop);
-}
-
-// 系統啟動
-InputController.init(canvas);
-requestAnimationFrame(gameLoop);
+Input.init(DOM.canvas);
+GameManager.init();
+requestAnimationFrame(engineLoop);
