@@ -140,46 +140,200 @@ export const CORE_MEMORIES = Object.freeze({
  * 流變資料庫 (數值天賦，針對基礎屬性或全域數值增益)
  */
 export const FLUX_TALENTS = Object.freeze({
-
-    FLUX_SW_AETHER: {
-        id: 'FLUX_SW_AETHER',
+    // ==========================================
+    // 星軌編織者天賦樹 (核心 ID: STAR_WEAVER)
+    // ==========================================
+    // 分支一：乙太強攻
+    SW_A1: {
+        id: 'SW_A1',
         coreId: 'STAR_WEAVER',
+        branch: '乙太強攻',
+        name: '乙太微粒',
+        description: '普攻基礎傷害提升 4 點。',
+        requires: [],
+        targetPath: 'basicAttack.damage',
+        operator: MODIFIER_OPERATOR.ADD,
+        value: 4
+    },
+    SW_A2: {
+        id: 'SW_A2',
+        coreId: 'STAR_WEAVER',
+        branch: '乙太強攻',
         name: '乙太湧動',
-        description: '減少 20% 普攻冷卻時間。',
+        description: '普攻冷卻時間減少 15%。',
+        requires: ['SW_A1'],
         targetPath: 'basicAttack.cooldown',
         operator: MODIFIER_OPERATOR.MULTIPLY,
-        value: -0.20
+        value: -0.15
     },
-    FLUX_SW_HP: {
-        id: 'FLUX_SW_HP',
+    SW_A3: {
+        id: 'SW_A3',
         coreId: 'STAR_WEAVER',
-        name: '星體塑形',
-        description: '提升 40 點最大生命值。',
-        targetPath: 'stats.hpMax',
+        branch: '乙太強攻',
+        name: '虛空貫注',
+        description: '普攻基礎傷害再提升 8 點。',
+        requires: ['SW_A2'],
+        targetPath: 'basicAttack.damage',
         operator: MODIFIER_OPERATOR.ADD,
-        value: 40
+        value: 8
     },
 
-    FLUX_IO_SPEED: {
-        id: 'FLUX_IO_SPEED',
-        coreId: 'IRON_OATH',
-        name: '流光步法',
-        description: '提升 15% 移動速度。',
+    // 分支二：星體屏障
+    SW_B1: {
+        id: 'SW_B1',
+        coreId: 'STAR_WEAVER',
+        branch: '星體屏障',
+        name: '星界防禦',
+        description: '物理防禦提升 8 點。',
+        requires: [],
+        targetPath: 'stats.physDef',
+        operator: MODIFIER_OPERATOR.ADD,
+        value: 8
+    },
+    SW_B2: {
+        id: 'SW_B2',
+        coreId: 'STAR_WEAVER',
+        branch: '星體屏障',
+        name: '物質塑形',
+        description: '最大生命值提升 35 點。',
+        requires: ['SW_B1'],
+        targetPath: 'stats.hpMax',
+        operator: MODIFIER_OPERATOR.ADD,
+        value: 35
+    },
+    SW_B3: {
+        id: 'SW_B3',
+        coreId: 'STAR_WEAVER',
+        branch: '星體屏障',
+        name: '折射力場',
+        description: '魔法抗性提升 15 點。',
+        requires: ['SW_B2'],
+        targetPath: 'stats.magicRes',
+        operator: MODIFIER_OPERATOR.ADD,
+        value: 15
+    },
+
+    // 分支三：流光步態
+    SW_C1: {
+        id: 'SW_C1',
+        coreId: 'STAR_WEAVER',
+        branch: '流光步態',
+        name: '輕盈浮步',
+        description: '移動速度提升 10%。',
+        requires: [],
+        targetPath: 'stats.moveSpeed',
+        operator: MODIFIER_OPERATOR.MULTIPLY,
+        value: 0.10
+    },
+    SW_C2: {
+        id: 'SW_C2',
+        coreId: 'STAR_WEAVER',
+        branch: '流光步態',
+        name: '光錐奔流',
+        description: '移動速度再提升 15%。',
+        requires: ['SW_C1'],
         targetPath: 'stats.moveSpeed',
         operator: MODIFIER_OPERATOR.MULTIPLY,
         value: 0.15
     },
-    FLUX_IO_DEF: {
-        id: 'FLUX_IO_DEF',
+
+    // ==========================================
+    // 鋼鐵誓約天賦樹 (核心 ID: IRON_OATH)
+    // ==========================================
+    // 分支一：鐵壁防禦
+    IO_A1: {
+        id: 'IO_A1',
         coreId: 'IRON_OATH',
-        name: '誓約護體',
-        description: '物理防禦基礎值提升 15 點。',
+        branch: '鐵壁防禦',
+        name: '重裝甲片',
+        description: '物理防禦基礎值提升 12 點。',
+        requires: [],
         targetPath: 'stats.physDef',
         operator: MODIFIER_OPERATOR.ADD,
-        value: 15
+        value: 12
+    },
+    IO_A2: {
+        id: 'IO_A2',
+        coreId: 'IRON_OATH',
+        branch: '鐵壁防禦',
+        name: '鍛爐體魄',
+        description: '最大生命值提升 50 點。',
+        requires: ['IO_A1'],
+        targetPath: 'stats.hpMax',
+        operator: MODIFIER_OPERATOR.ADD,
+        value: 50
+    },
+    IO_A3: {
+        id: 'IO_A3',
+        coreId: 'IRON_OATH',
+        branch: '鐵壁防禦',
+        name: '不倒壁壘',
+        description: '物理防禦基礎值再提升 20 點。',
+        requires: ['IO_A2'],
+        targetPath: 'stats.physDef',
+        operator: MODIFIER_OPERATOR.ADD,
+        value: 20
+    },
+
+    // 分支二：重擊斬切
+    IO_B1: {
+        id: 'IO_B1',
+        coreId: 'IRON_OATH',
+        branch: '重擊斬切',
+        name: '開刃打磨',
+        description: '普攻基礎傷害提升 6 點。',
+        requires: [],
+        targetPath: 'basicAttack.damage',
+        operator: MODIFIER_OPERATOR.ADD,
+        value: 6
+    },
+    IO_B2: {
+        id: 'IO_B2',
+        coreId: 'IRON_OATH',
+        branch: '重擊斬切',
+        name: '迅猛揮舞',
+        description: '普攻冷卻時間減少 15%。',
+        requires: ['IO_B1'],
+        targetPath: 'basicAttack.cooldown',
+        operator: MODIFIER_OPERATOR.MULTIPLY,
+        value: -0.15
+    },
+    IO_B3: {
+        id: 'IO_B3',
+        coreId: 'IRON_OATH',
+        branch: '重擊斬切',
+        name: '裂地巨力',
+        description: '普攻基礎傷害再提升 12 點。',
+        requires: ['IO_B2'],
+        targetPath: 'basicAttack.damage',
+        operator: MODIFIER_OPERATOR.ADD,
+        value: 12
+    },
+
+    // 分支三：戰場突進
+    IO_C1: {
+        id: 'IO_C1',
+        coreId: 'IRON_OATH',
+        branch: '戰場突進',
+        name: '行軍步伐',
+        description: '移動速度提升 10%。',
+        requires: [],
+        targetPath: 'stats.moveSpeed',
+        operator: MODIFIER_OPERATOR.MULTIPLY,
+        value: 0.10
+    },
+    IO_C2: {
+        id: 'IO_C2',
+        coreId: 'IRON_OATH',
+        branch: '戰場突進',
+        name: '破陣突襲',
+        description: '移動速度再提升 15%。',
+        requires: ['IO_C1'],
+        targetPath: 'stats.moveSpeed',
+        operator: MODIFIER_OPERATOR.MULTIPLY,
+        value: 0.15
     }
 });
-
 export const RHAPSODIES = Object.freeze({
     RHAP_TRIPLE_BOLT: {
         id: 'RHAP_TRIPLE_BOLT',
