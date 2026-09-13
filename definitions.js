@@ -99,7 +99,7 @@ export const CORE_MEMORIES = Object.freeze({
         description: '遠程魔法型核心，擅長保持距離進行彈道壓制。',
         baseStats: {
             hpMax: 200,
-            moveSpeed: 100,
+            moveSpeed: 125,
             physDef: 5,
             magicRes: 15
         },
@@ -107,7 +107,7 @@ export const CORE_MEMORIES = Object.freeze({
             attackType: ATTACK_TYPE.RANGED,
             damageType: DAMAGE_TYPE.MAGIC,
             damage: 20,
-            cooldown: 2.0,
+            cooldown: 1.5,
             maxRange: 400,
             speed: 216,
             radius: 8
@@ -120,7 +120,7 @@ export const CORE_MEMORIES = Object.freeze({
         description: '近戰物理型核心，具備高防禦與近身威脅。',
         baseStats: {
             hpMax: 320,
-            moveSpeed: 110,
+            moveSpeed: 137.5,
             physDef: 20,
             magicRes: 5
         },
@@ -128,9 +128,9 @@ export const CORE_MEMORIES = Object.freeze({
             attackType: ATTACK_TYPE.MELEE,
             damageType: DAMAGE_TYPE.PHYSICAL,
             damage: 28,
-            cooldown: 1.2,
+            cooldown: 1.5,
             maxRange: 60,
-            swingAngle: 75 // 揮擊扇形角度
+            swingAngle: 75
         },
         skillSlots: ['HEAVY_CLEAVE', 'SHIELD_CHARGE', 'IRON_FORTRESS']
     }
