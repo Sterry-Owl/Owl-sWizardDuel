@@ -1,14 +1,17 @@
 import { ATTACK_TYPE, DAMAGE_TYPE, CORE_MEMORIES, FLUX_TALENTS, RHAPSODIES } from './definitions.js';
 import { buildCombatLoadout } from './builder.js';
 import { NetworkManager } from './network.js';
+import { Camera2D } from './camera.js';
+import { DungeonMap } from './map.js';
+import { DungeonEnemy } from './enemy.js';
 
 /**
- * 引擎設定常數
+ * 引擎設定常數與遊戲狀態
  */
 const ENGINE_CONFIG = {
-    CANVAS: { WIDTH: 960, HEIGHT: 540, GRID_SIZE: 40, BG_COLOR: '#0e1117', GRID_COLOR: '#181f2e' },
+    CANVAS: { WIDTH: 960, HEIGHT: 540 },
     SYNC_RATE: 1 / 30,
-    LERP_FACTOR: 18 // 快照平滑追蹤速率
+    LERP_FACTOR: 18
 };
 
 const GAME_STATE = Object.freeze({
@@ -18,7 +21,7 @@ const GAME_STATE = Object.freeze({
 });
 
 /**
- * DOM 快取
+ * DOM 節點快取
  */
 const DOM = {
     lobbyPanel: document.getElementById('lobby-panel'),
@@ -59,7 +62,7 @@ const DOM = {
 };
 
 /**
- * 輸入監聽模組
+ * 輸入監聽模組 (支援 Q/E/R 技能鍵與滑鼠點擊)
  */
 const Input = {
     keys: {},
@@ -138,7 +141,7 @@ const DamageCalculator = {
 };
 
 /**
- * 浮動戰鬥文字 (Floating Damage Numbers)
+ * 浮動戰鬥數字
  */
 class FloatingText {
     constructor(x, y, text, color) {
@@ -147,7 +150,7 @@ class FloatingText {
         this.text = text;
         this.color = color;
         this.life = 0.8;
-        this.vy = -50;
+        this.vy = -45;
     }
 
     update(dt) {
@@ -158,7 +161,7 @@ class FloatingText {
     draw(ctx) {
         ctx.save();
         ctx.globalAlpha = Math.max(0, this.life / 0.8);
-        ctx.font = 'bold 15px monospace';
+        ctx.font = 'bold 14px monospace';
         ctx.fillStyle = this.color;
         ctx.textAlign = 'center';
         ctx.shadowColor = '#000000';
@@ -169,7 +172,7 @@ class FloatingText {
 }
 
 /**
- * 粒子與視覺特效系統
+ * 特效與粒子系統
  */
 class VFXSystem {
     constructor() {
@@ -180,15 +183,15 @@ class VFXSystem {
     spawnHit(x, y, color, count = 12) {
         for (let i = 0; i < count; i++) {
             const angle = Math.random() * Math.PI * 2;
-            const speed = Math.random() * 220 + 60;
+            const speed = Math.random() * 200 + 50;
             this.particles.push({
                 x, y,
                 vx: Math.cos(angle) * speed,
                 vy: Math.sin(angle) * speed,
                 radius: Math.random() * 2.5 + 1.5,
                 color,
-                life: 0.4,
-                maxLife: 0.4
+                life: 0.35,
+                maxLife: 0.35
             });
         }
     }
@@ -233,7 +236,7 @@ class VFXSystem {
 }
 
 /**
- * 實體類別：彈道
+ * 彈道實體
  */
 class Projectile {
     constructor(ownerId, x, y, angle, speed, radius, maxRange, damage, damageType, color) {
@@ -256,30 +259,27 @@ class Projectile {
         this.y += this.vy * dt;
         this.remainingDist -= step;
 
-        if (this.remainingDist <= 0 || 
-            this.x < 0 || this.x > ENGINE_CONFIG.CANVAS.WIDTH || 
-            this.y < 0 || this.y > ENGINE_CONFIG.CANVAS.HEIGHT) {
+        if (this.remainingDist <= 0) {
             this.isAlive = false;
         }
     }
 
     draw(ctx) {
         ctx.save();
-        // 光暈核
-        const grad = ctx.createRadialGradient(this.x, this.y, 1, this.x, this.y, this.radius * 1.6);
+        const grad = ctx.createRadialGradient(this.x, this.y, 1, this.x, this.y, this.radius * 1.5);
         grad.addColorStop(0, '#ffffff');
         grad.addColorStop(0.4, this.color);
         grad.addColorStop(1, 'transparent');
         ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius * 1.6, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y, this.radius * 1.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
     }
 }
 
 /**
- * 實體類別：近戰揮擊視覺
+ * 近戰揮擊視覺
  */
 class MeleeSweepVisual {
     constructor(x, y, angle, range, arcAngle, color) {
@@ -289,7 +289,7 @@ class MeleeSweepVisual {
         this.range = range;
         this.arcAngle = (arcAngle * Math.PI) / 180;
         this.color = color;
-        this.life = 0.16;
+        this.life = 0.15;
     }
 
     update(dt) {
@@ -298,7 +298,7 @@ class MeleeSweepVisual {
 
     draw(ctx) {
         ctx.save();
-        const alpha = Math.max(0, this.life / 0.16);
+        const alpha = Math.max(0, this.life / 0.15);
         ctx.globalAlpha = alpha;
         ctx.strokeStyle = this.color;
         ctx.fillStyle = this.color;
@@ -315,7 +315,7 @@ class MeleeSweepVisual {
 }
 
 /**
- * 實體類別：地面延時 AOE
+ * 地面延時 AOE
  */
 class GroundAoeVisual {
     constructor(ownerId, x, y, radius, delay, damage, damageType, onExplode) {
@@ -342,7 +342,6 @@ class GroundAoeVisual {
     draw(ctx) {
         ctx.save();
         const progress = 1 - Math.max(0, this.delay / this.totalDelay);
-        // 符文預警邊緣
         ctx.strokeStyle = '#ef4444';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([6, 6]);
@@ -350,7 +349,6 @@ class GroundAoeVisual {
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.stroke();
 
-        // 內部填充增長光環
         ctx.setLineDash([]);
         ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
         ctx.beginPath();
@@ -361,14 +359,14 @@ class GroundAoeVisual {
 }
 
 /**
- * 玩家實體類別 (整合預測與插值)
+ * 玩家實體類別
  */
 class ArenaPlayer {
     constructor(id, x, y, baseColor) {
         this.id = id;
         this.x = x;
         this.y = y;
-        this.targetX = x; // 插值目標
+        this.targetX = x;
         this.targetY = y;
         this.radius = 18;
         this.color = baseColor;
@@ -390,22 +388,24 @@ class ArenaPlayer {
         this.skillCooldowns = [0, 0, 0];
     }
 
-    update(dt, inputVector, mousePos, triggers, opponent, gameContext) {
+    update(dt, inputVector, mouseWorldPos, triggers, gameContext) {
         if (!this.loadout) return;
 
-        this.aimAngle = Math.atan2(mousePos.y - this.y, mousePos.x - this.x);
+        this.aimAngle = Math.atan2(mouseWorldPos.y - this.y, mouseWorldPos.x - this.x);
 
-        // 衝鋒狀態
         if (this.dashState) {
             this.dashState.timeRemaining -= dt;
             this.x += this.dashState.vx * dt;
             this.y += this.dashState.vy * dt;
 
-            const dist = Math.hypot(this.x - opponent.x, this.y - opponent.y);
-            if (dist < this.radius + opponent.radius) {
-                opponent.takeDamage(this.dashState.damage, this.dashState.damageType, gameContext);
-                this.dashState = null;
-            } else if (this.dashState.timeRemaining <= 0) {
+            // 衝鋒期間檢查碰撞怪物
+            for (const enemy of gameContext.enemies) {
+                if (Math.hypot(this.x - enemy.x, this.y - enemy.y) < this.radius + enemy.radius) {
+                    enemy.takeDamage(this.dashState.damage, this.dashState.damageType, gameContext);
+                }
+            }
+
+            if (this.dashState.timeRemaining <= 0) {
                 this.dashState = null;
             }
         } else {
@@ -413,25 +413,23 @@ class ArenaPlayer {
             this.y += inputVector.y * this.loadout.stats.moveSpeed * dt;
         }
 
-        // 邊界防禦
-        this.x = Math.max(this.radius, Math.min(ENGINE_CONFIG.CANVAS.WIDTH - this.radius, this.x));
-        this.y = Math.max(this.radius, Math.min(ENGINE_CONFIG.CANVAS.HEIGHT - this.radius, this.y));
+        // 迷宮牆壁防穿牆滑動
+        if (gameContext.dungeonMap) {
+            gameContext.dungeonMap.resolveCircleCollision(this);
+        }
 
-        // 冷卻時間遞減
         if (this.attackCooldown > 0) this.attackCooldown = Math.max(0, this.attackCooldown - dt);
         for (let i = 0; i < 3; i++) {
             if (this.skillCooldowns[i] > 0) this.skillCooldowns[i] = Math.max(0, this.skillCooldowns[i] - dt);
         }
 
-        // 技能發動
         if (triggers.attack) this.executeBasicAttack(gameContext);
-        if (triggers.skill1) this.executeSkill(0, mousePos, opponent, gameContext);
-        if (triggers.skill2) this.executeSkill(1, mousePos, opponent, gameContext);
-        if (triggers.skill3) this.executeSkill(2, mousePos, opponent, gameContext);
+        if (triggers.skill1) this.executeSkill(0, mouseWorldPos, gameContext);
+        if (triggers.skill2) this.executeSkill(1, mouseWorldPos, gameContext);
+        if (triggers.skill3) this.executeSkill(2, mouseWorldPos, gameContext);
     }
 
     interpolate(dt) {
-        // 實體線性插值 (指數衰減插值避免網路跳動)
         const factor = Math.min(1, dt * ENGINE_CONFIG.LERP_FACTOR);
         this.x += (this.targetX - this.x) * factor;
         this.y += (this.targetY - this.y) * factor;
@@ -476,12 +474,12 @@ class ArenaPlayer {
         this.attackCooldown = atk.cooldown;
     }
 
-    executeSkill(index, mousePos, opponent, ctx) {
+    executeSkill(index, mouseWorldPos, ctx) {
         if (this.skillCooldowns[index] > 0) return;
         const skill = this.loadout.skills[index];
         if (!skill) return;
 
-        const distToMouse = Math.hypot(mousePos.x - this.x, mousePos.y - this.y);
+        const distToMouse = Math.hypot(mouseWorldPos.x - this.x, mouseWorldPos.y - this.y);
 
         switch (skill.mechanic) {
             case 'PROJECTILE_STRAIGHT': {
@@ -514,9 +512,10 @@ class ArenaPlayer {
                 ctx.groundAoes.push(new GroundAoeVisual(
                     this.id, tx, ty, skill.radius, skill.delay,
                     skill.baseDamage, skill.damageType, (aoe) => {
-                        const d = Math.hypot(opponent.x - aoe.x, opponent.y - aoe.y);
-                        if (d <= aoe.radius + opponent.radius) {
-                            opponent.takeDamage(aoe.damage, aoe.damageType, ctx);
+                        for (const enemy of ctx.enemies) {
+                            if (Math.hypot(enemy.x - aoe.x, enemy.y - aoe.y) <= aoe.radius + enemy.radius) {
+                                enemy.takeDamage(aoe.damage, aoe.damageType, ctx);
+                            }
                         }
                         ctx.vfx.spawnHit(aoe.x, aoe.y, '#ef4444', 24);
                     }
@@ -548,13 +547,11 @@ class ArenaPlayer {
 
     draw(ctx) {
         ctx.save();
-        // 腳底立體陰影
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.beginPath();
         ctx.ellipse(this.x, this.y + this.radius * 0.8, this.radius * 1.1, this.radius * 0.5, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // 準星指示線
         ctx.strokeStyle = '#475569';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -562,7 +559,6 @@ class ArenaPlayer {
         ctx.lineTo(this.x + Math.cos(this.aimAngle) * (this.radius + 14), this.y + Math.sin(this.aimAngle) * (this.radius + 14));
         ctx.stroke();
 
-        // 護盾外環
         if (this.shield > 0) {
             ctx.strokeStyle = '#38bdf8';
             ctx.lineWidth = 4;
@@ -571,7 +567,6 @@ class ArenaPlayer {
             ctx.stroke();
         }
 
-        // 角色本體多層漸層
         const grad = ctx.createRadialGradient(this.x, this.y, 2, this.x, this.y, this.radius);
         grad.addColorStop(0, '#ffffff');
         grad.addColorStop(0.6, this.color);
@@ -593,9 +588,16 @@ class ArenaPlayer {
 const GameManager = {
     state: GAME_STATE.LOBBY,
     isPractice: false,
-    p1: new ArenaPlayer('p1', 180, 270, '#38bdf8'),
-    p2: new ArenaPlayer('p2', 780, 270, '#f43f5e'),
+    camera: new Camera2D(960, 540),
+    dungeonMap: null,
+    currentFloor: 1,
+
+    p1: new ArenaPlayer('p1', 0, 0, '#38bdf8'),
+    p2: new ArenaPlayer('p2', 0, 0, '#f43f5e'),
+
+    enemies: [],
     projectiles: [],
+    enemyProjectiles: [],
     meleeSweeps: [],
     groundAoes: [],
     vfx: new VFXSystem(),
@@ -637,7 +639,6 @@ const GameManager = {
                 document.querySelectorAll('#dynamic-cores-container .select-card').forEach(c => c.classList.remove('selected'));
                 card.classList.add('selected');
                 this.selectedCoreId = core.id;
-                // 重設點數與天賦集
                 this.fluxPoints = 5;
                 this.selectedFluxIds.clear();
                 this.updateSubSelections();
@@ -647,7 +648,6 @@ const GameManager = {
     },
 
     updateSubSelections() {
-        // 1. 渲染流變天賦樹 (支援 5 點配點與前置驗證)
         const availableFluxes = Object.values(FLUX_TALENTS).filter(f => f.coreId === this.selectedCoreId);
         DOM.fluxContainer.innerHTML = '';
         if (DOM.fluxPointsDisplay) DOM.fluxPointsDisplay.textContent = this.fluxPoints;
@@ -659,11 +659,8 @@ const GameManager = {
 
             const card = document.createElement('div');
             let statusClass = '';
-            if (isUnlocked) {
-                statusClass = 'talent-active';
-            } else if (!prerequisitesMet) {
-                statusClass = 'talent-locked';
-            }
+            if (isUnlocked) statusClass = 'talent-active';
+            else if (!prerequisitesMet) statusClass = 'talent-locked';
 
             const reqDesc = flux.requires.length > 0 
                 ? `<div style="font-size: 11px; color: #f59e0b; margin-top: 4px;">前置：${flux.requires.map(id => FLUX_TALENTS[id].name).join(', ')}</div>` 
@@ -678,7 +675,6 @@ const GameManager = {
             `;
 
             card.addEventListener('click', () => {
-                // 退點邏輯：已解鎖且後續節點無人依賴此節點時可退點
                 if (isUnlocked) {
                     const isRequiredByOthers = Array.from(this.selectedFluxIds).some(activeId => {
                         const activeFlux = FLUX_TALENTS[activeId];
@@ -694,7 +690,6 @@ const GameManager = {
                     return;
                 }
 
-                // 點亮邏輯：前置需達成且點數需大於 0
                 if (canAllocate) {
                     this.selectedFluxIds.add(flux.id);
                     this.fluxPoints--;
@@ -705,7 +700,6 @@ const GameManager = {
             DOM.fluxContainer.appendChild(card);
         });
 
-        // 2. 渲染狂想機制 (維持單選)
         const availableRhapsodies = Object.values(RHAPSODIES).filter(r => r.coreId === this.selectedCoreId);
         this.selectedRhapsodyId = availableRhapsodies.length > 0 ? availableRhapsodies[0].id : null;
         DOM.rhapsodyContainer.innerHTML = '';
@@ -727,27 +721,30 @@ const GameManager = {
     },
 
     setupLobbyEvents() {
-        DOM.btnResetFlux.addEventListener('click', () => {
-            this.fluxPoints = 5;
-            this.selectedFluxIds.clear();
-            this.updateSubSelections();
-        });
+        if (DOM.btnResetFlux) {
+            DOM.btnResetFlux.addEventListener('click', () => {
+                this.fluxPoints = 5;
+                this.selectedFluxIds.clear();
+                this.updateSubSelections();
+            });
+        }
+
         DOM.btnPracticeMode.addEventListener('click', () => {
             this.isPractice = true;
             this.state = GAME_STATE.LOADOUT;
-            DOM.connectionStatus.textContent = '進入單人訓練場 (AI/假人模式)';
+            DOM.connectionStatus.textContent = '進入單人地下城冒險模式';
             DOM.loadoutSelection.classList.remove('hidden');
         });
 
         DOM.btnCreateRoom.addEventListener('click', async () => {
             DOM.btnCreateRoom.disabled = true;
-            DOM.connectionStatus.textContent = '註冊專屬房間代碼...';
+            DOM.connectionStatus.textContent = '正在註冊 4 碼專屬房間...';
             try {
                 const id = await NetworkManager.init();
                 DOM.roomIdDisplay.textContent = `房間代碼：${id}`;
                 DOM.connectionStatus.textContent = '房間已建立，等待訪客連線...';
             } catch {
-                DOM.connectionStatus.textContent = '建立失敗，請檢查網路狀態';
+                DOM.connectionStatus.textContent = '建立失敗，請檢查網路連線';
                 DOM.btnCreateRoom.disabled = false;
             }
         });
@@ -778,7 +775,6 @@ const GameManager = {
 
             if (this.isPractice) {
                 this.p1.applyLoadout(buildCombatLoadout(payload.coreId, payload.fluxIds, payload.rhapsodyIds));
-                this.p2.applyLoadout(buildCombatLoadout('IRON_OATH', [], []));
                 this.startGame();
                 return;
             }
@@ -815,7 +811,12 @@ const GameManager = {
                     break;
                 }
                 case 'START_GAME': {
+                    this.loadFloor(pkg.floor, pkg.seed);
                     this.startGame();
+                    break;
+                }
+                case 'NEXT_FLOOR': {
+                    this.loadFloor(pkg.floor, pkg.seed);
                     break;
                 }
                 case 'CLIENT_INPUT': {
@@ -836,9 +837,37 @@ const GameManager = {
 
     checkMatchStart() {
         if (this.localReady && this.remoteReady && NetworkManager.isHost) {
-            NetworkManager.send({ type: 'START_GAME' });
+            const seed = Math.floor(Math.random() * 1000000);
+            NetworkManager.send({ type: 'START_GAME', floor: 1, seed });
+            this.loadFloor(1, seed);
             this.startGame();
         }
+    },
+
+    loadFloor(floorNumber, seed) {
+        this.currentFloor = floorNumber;
+        this.dungeonMap = new DungeonMap(seed, 45, 45, 48);
+        this.camera.setWorldBounds(this.dungeonMap.worldWidth, this.dungeonMap.worldHeight);
+
+        this.p1.x = this.dungeonMap.playerSpawn.x;
+        this.p1.y = this.dungeonMap.playerSpawn.y;
+        this.p2.x = this.dungeonMap.playerSpawn.x + 30;
+        this.p2.y = this.dungeonMap.playerSpawn.y + 30;
+
+        this.enemies = this.dungeonMap.enemySpawns.map((s, idx) => 
+            new DungeonEnemy(`enemy_${idx}`, s.x, s.y, s.type)
+        );
+
+        this.projectiles = [];
+        this.meleeSweeps = [];
+        this.groundAoes = [];
+        this.enemyProjectiles = [];
+    },
+
+    spawnEnemyProjectile(x, y, angle, speed, radius, maxRange, damage, damageType, color) {
+        this.enemyProjectiles.push(
+            new Projectile('enemy', x, y, angle, speed, radius, maxRange, damage, damageType, color)
+        );
     },
 
     startGame() {
@@ -846,8 +875,12 @@ const GameManager = {
         DOM.lobbyPanel.classList.add('hidden');
         DOM.battleContainer.classList.remove('hidden');
 
-        DOM.p1Name.textContent = `P1: ${this.p1.loadout.name}`;
-        DOM.p2Name.textContent = `P2: ${this.p2.loadout.name}`;
+        if (this.isPractice) {
+            this.loadFloor(1, Math.floor(Math.random() * 1000000));
+        }
+
+        DOM.p1Name.textContent = `P1: ${this.p1.loadout ? this.p1.loadout.name : '勇者'}`;
+        DOM.p2Name.textContent = this.isPractice ? '單人模式' : `P2: ${this.p2.loadout ? this.p2.loadout.name : '隊友'}`;
 
         const myPlayer = (this.isPractice || NetworkManager.isHost) ? this.p1 : this.p2;
         for (let i = 0; i < 3; i++) {
@@ -856,16 +889,17 @@ const GameManager = {
     },
 
     checkMeleeHit(attacker, angle, range, arcAngle, damage, damageType) {
-        const def = attacker.id === 'p1' ? this.p2 : this.p1;
-        const dist = Math.hypot(def.x - attacker.x, def.y - attacker.y);
-        if (dist > range + def.radius) return;
+        for (const enemy of this.enemies) {
+            const dist = Math.hypot(enemy.x - attacker.x, enemy.y - attacker.y);
+            if (dist > range + enemy.radius) continue;
 
-        let diff = Math.atan2(def.y - attacker.y, def.x - attacker.x) - angle;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        while (diff > Math.PI) diff -= Math.PI * 2;
+            let diff = Math.atan2(enemy.y - attacker.y, enemy.x - attacker.x) - angle;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
 
-        if (Math.abs(diff) <= ((arcAngle * Math.PI) / 180) / 2) {
-            def.takeDamage(damage, damageType, this);
+            if (Math.abs(diff) <= ((arcAngle * Math.PI) / 180) / 2) {
+                enemy.takeDamage(damage, damageType, this);
+            }
         }
     },
 
@@ -873,72 +907,93 @@ const GameManager = {
         if (this.state !== GAME_STATE.IN_GAME) return;
 
         this.vfx.update(dt);
+        const myPlayer = (this.isPractice || NetworkManager.isHost) ? this.p1 : this.p2;
+        const mouseWorld = this.camera.screenToWorld(Input.mouse.x, Input.mouse.y);
 
-        if (this.isPractice) {
-            const p1Move = Input.getMovementVector();
-            const triggers = Input.consumeTriggers();
-            this.p1.update(dt, p1Move, Input.mouse, triggers, this.p2, this);
+        this.camera.follow(myPlayer.x, myPlayer.y, dt);
 
-            if (this.p2.hp <= 0) this.p2.hp = this.p2.loadout.stats.hpMax;
-
-            this.updateSimulatedEntities(dt);
-            this.updateHUD();
-            return;
-        }
-
-        if (NetworkManager.isHost) {
+        if (this.isPractice || NetworkManager.isHost) {
             const p1Move = Input.getMovementVector();
             const p1Triggers = Input.consumeTriggers();
-            this.p1.update(dt, p1Move, Input.mouse, p1Triggers, this.p2, this);
+            this.p1.update(dt, p1Move, mouseWorld, p1Triggers, this);
 
-            this.p2.update(
-                dt,
-                this.remoteInputs.move || { x: 0, y: 0 },
-                this.remoteInputs.mouse || { x: 0, y: 0 },
-                this.remoteInputs.triggers || {},
-                this.p1,
-                this
-            );
-            this.remoteInputs.triggers = {};
+            if (!this.isPractice && this.p2.loadout) {
+                this.p2.update(
+                    dt,
+                    this.remoteInputs.move || { x: 0, y: 0 },
+                    this.remoteInputs.mouse || { x: 0, y: 0 },
+                    this.remoteInputs.triggers || {},
+                    this
+                );
+                this.remoteInputs.triggers = {};
+            }
+
+            // 更新怪物群
+            const activePlayers = [this.p1, this.p2].filter(p => p.loadout !== null && p.hp > 0);
+            for (let i = this.enemies.length - 1; i >= 0; i--) {
+                const enemy = this.enemies[i];
+                enemy.update(dt, activePlayers, this.dungeonMap, this);
+                if (!enemy.isAlive) {
+                    this.enemies.splice(i, 1);
+                }
+            }
+
+            // 房間傳送陣判定
+            if (this.enemies.length === 0 && !this.dungeonMap.portal.active) {
+                this.dungeonMap.portal.active = true;
+            }
+
+            if (this.dungeonMap.portal.active) {
+                const dPortal = Math.hypot(myPlayer.x - this.dungeonMap.portal.x, myPlayer.y - this.dungeonMap.portal.y);
+                if (dPortal < myPlayer.radius + this.dungeonMap.portal.radius) {
+                    const nextFloor = this.currentFloor + 1;
+                    const nextSeed = Math.floor(Math.random() * 1000000);
+                    if (!this.isPractice) {
+                        NetworkManager.send({ type: 'NEXT_FLOOR', floor: nextFloor, seed: nextSeed });
+                    }
+                    this.loadFloor(nextFloor, nextSeed);
+                }
+            }
 
             this.updateSimulatedEntities(dt);
 
-            // 主機定期向訪客廣播全場快照 (30Hz)
-            this.syncTimer += dt;
-            if (this.syncTimer >= ENGINE_CONFIG.SYNC_RATE) {
-                this.syncTimer = 0;
-                NetworkManager.send({
-                    type: 'HOST_SNAPSHOT',
-                    snapshot: {
-                        p1: { x: this.p1.x, y: this.p1.y, hp: this.p1.hp, shield: this.p1.shield, aim: this.p1.aimAngle, cdAtk: this.p1.attackCooldown, cds: this.p1.skillCooldowns },
-                        p2: { x: this.p2.x, y: this.p2.y, hp: this.p2.hp, shield: this.p2.shield, aim: this.p2.aimAngle, cdAtk: this.p2.attackCooldown, cds: this.p2.skillCooldowns },
-                        projectiles: this.projectiles.map(p => ({ x: p.x, y: p.y, r: p.radius, c: p.color })),
-                        sweeps: this.meleeSweeps.map(s => ({ x: s.x, y: s.y, a: s.angle, r: s.range, arc: s.arcAngle, c: s.color, life: s.life })),
-                        aoes: this.groundAoes.map(a => ({ x: a.x, y: a.y, r: a.radius, delay: a.delay, total: a.totalDelay }))
-                    }
-                });
+            // 主機廣播快照
+            if (!this.isPractice) {
+                this.syncTimer += dt;
+                if (this.syncTimer >= ENGINE_CONFIG.SYNC_RATE) {
+                    this.syncTimer = 0;
+                    NetworkManager.send({
+                        type: 'HOST_SNAPSHOT',
+                        snapshot: {
+                            p1: { x: this.p1.x, y: this.p1.y, hp: this.p1.hp, shield: this.p1.shield, aim: this.p1.aimAngle, cdAtk: this.p1.attackCooldown, cds: this.p1.skillCooldowns },
+                            p2: { x: this.p2.x, y: this.p2.y, hp: this.p2.hp, shield: this.p2.shield, aim: this.p2.aimAngle, cdAtk: this.p2.attackCooldown, cds: this.p2.skillCooldowns },
+                            enemies: this.enemies.map(e => ({ id: e.id, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, c: e.color, r: e.radius })),
+                            projectiles: this.projectiles.map(p => ({ x: p.x, y: p.y, r: p.radius, c: p.color })),
+                            enemyProjectiles: this.enemyProjectiles.map(ep => ({ x: ep.x, y: ep.y, r: ep.radius, c: ep.color })),
+                            sweeps: this.meleeSweeps.map(s => ({ x: s.x, y: s.y, a: s.angle, r: s.range, arc: s.arcAngle, c: s.color, life: s.life })),
+                            aoes: this.groundAoes.map(a => ({ x: a.x, y: a.y, r: a.radius, delay: a.delay, total: a.totalDelay })),
+                            portalActive: this.dungeonMap.portal.active
+                        }
+                    });
+                }
             }
         } else {
-            // 訪客端核心：客戶端預測 (Client-side Prediction)
+            // 訪客端：本地預測與伺服器插值
             const p2Move = Input.getMovementVector();
             const triggers = Input.consumeTriggers();
 
-            // 本地直接計算移動，完全消除等待主機回傳的延遲
             this.p2.x += p2Move.x * this.p2.loadout.stats.moveSpeed * dt;
             this.p2.y += p2Move.y * this.p2.loadout.stats.moveSpeed * dt;
-            this.p2.x = Math.max(this.p2.radius, Math.min(ENGINE_CONFIG.CANVAS.WIDTH - this.p2.radius, this.p2.x));
-            this.p2.y = Math.max(this.p2.radius, Math.min(ENGINE_CONFIG.CANVAS.HEIGHT - this.p2.radius, this.p2.y));
-            this.p2.aimAngle = Math.atan2(Input.mouse.y - this.p2.y, Input.mouse.x - this.p2.x);
+            if (this.dungeonMap) this.dungeonMap.resolveCircleCollision(this.p2);
+            this.p2.aimAngle = Math.atan2(mouseWorld.y - this.p2.y, mouseWorld.x - this.p2.x);
 
-            // 對主機進行線性插值追蹤
             this.p1.interpolate(dt);
 
-            // 發送操作封包
             NetworkManager.send({
                 type: 'CLIENT_INPUT',
                 input: {
                     move: p2Move,
-                    mouse: Input.mouse,
+                    mouse: mouseWorld,
                     triggers
                 }
             });
@@ -948,15 +1003,46 @@ const GameManager = {
     },
 
     updateSimulatedEntities(dt) {
+        // 玩家彈道更新與障礙物消滅
         for (let i = this.projectiles.length - 1; i >= 0; i--) {
             const p = this.projectiles[i];
             p.update(dt);
-            const target = p.ownerId === 'p1' ? this.p2 : this.p1;
-            if (Math.hypot(p.x - target.x, p.y - target.y) < p.radius + target.radius) {
+
+            if (this.dungeonMap.isPointInWall(p.x, p.y)) {
                 p.isAlive = false;
-                target.takeDamage(p.damage, p.damageType, this);
+                this.vfx.spawnHit(p.x, p.y, '#94a3b8', 6);
             }
+
+            for (const enemy of this.enemies) {
+                if (Math.hypot(p.x - enemy.x, p.y - enemy.y) < p.radius + enemy.radius) {
+                    p.isAlive = false;
+                    enemy.takeDamage(p.damage, p.damageType, this);
+                    break;
+                }
+            }
+
             if (!p.isAlive) this.projectiles.splice(i, 1);
+        }
+
+        // 怪物彈道更新
+        for (let i = this.enemyProjectiles.length - 1; i >= 0; i--) {
+            const ep = this.enemyProjectiles[i];
+            ep.update(dt);
+
+            if (this.dungeonMap.isPointInWall(ep.x, ep.y)) {
+                ep.isAlive = false;
+            } else {
+                const targetPlayers = [this.p1, this.p2].filter(p => p.loadout && p.hp > 0);
+                for (const player of targetPlayers) {
+                    if (Math.hypot(ep.x - player.x, ep.y - player.y) < ep.radius + player.radius) {
+                        ep.isAlive = false;
+                        player.takeDamage(ep.damage, ep.damageType, this);
+                        break;
+                    }
+                }
+            }
+
+            if (!ep.isAlive) this.enemyProjectiles.splice(i, 1);
         }
 
         for (let i = this.meleeSweeps.length - 1; i >= 0; i--) {
@@ -971,14 +1057,12 @@ const GameManager = {
     },
 
     applySnapshot(s) {
-        // 主機授權位置和解 (Reconciliation)
         this.p1.targetX = s.p1.x;
         this.p1.targetY = s.p1.y;
         this.p1.hp = s.p1.hp;
         this.p1.shield = s.p1.shield;
         this.p1.aimAngle = s.p1.aim;
 
-        // 若本地預測與伺服器差距過大才進行平滑校正
         const delta = Math.hypot(this.p2.x - s.p2.x, this.p2.y - s.p2.y);
         if (delta > 40) {
             this.p2.x = s.p2.x;
@@ -989,7 +1073,19 @@ const GameManager = {
         this.p2.attackCooldown = s.p2.cdAtk;
         this.p2.skillCooldowns = s.p2.cds;
 
+        if (this.dungeonMap) this.dungeonMap.portal.active = s.portalActive;
+
+        this.enemies = s.enemies.map(se => {
+            const e = new DungeonEnemy(se.id, se.x, se.y, 'MELEE');
+            e.hp = se.hp;
+            e.maxHp = se.maxHp;
+            e.color = se.c;
+            e.radius = se.r;
+            return e;
+        });
+
         this.projectiles = s.projectiles.map(p => new Projectile('remote', p.x, p.y, 0, 0, p.r, 999, 0, '', p.c));
+        this.enemyProjectiles = s.enemyProjectiles.map(ep => new Projectile('enemy', ep.x, ep.y, 0, 0, ep.r, 999, 0, '', ep.c));
         this.meleeSweeps = s.sweeps.map(sw => {
             const inst = new MeleeSweepVisual(sw.x, sw.y, sw.a, sw.r, (sw.arc * 180) / Math.PI, sw.c);
             inst.life = sw.life;
@@ -1003,20 +1099,22 @@ const GameManager = {
     },
 
     updateHUD() {
-        if (!this.p1.loadout || !this.p2.loadout) return;
+        const myPlayer = (this.isPractice || NetworkManager.isHost) ? this.p1 : this.p2;
+        if (!myPlayer.loadout) return;
 
-        const p1HpRatio = Math.max(0, this.p1.hp / this.p1.loadout.stats.hpMax);
-        const p2HpRatio = Math.max(0, this.p2.hp / this.p2.loadout.stats.hpMax);
-
+        const p1HpRatio = this.p1.loadout ? Math.max(0, this.p1.hp / this.p1.loadout.stats.hpMax) : 0;
         DOM.p1HpFill.style.width = `${p1HpRatio * 100}%`;
-        DOM.p2HpFill.style.width = `${p2HpRatio * 100}%`;
-        DOM.p1HpText.textContent = `${this.p1.hp}/${this.p1.loadout.stats.hpMax} ${this.p1.shield > 0 ? `(+${this.p1.shield})` : ''}`;
-        DOM.p2HpText.textContent = `${this.p2.hp}/${this.p2.loadout.stats.hpMax} ${this.p2.shield > 0 ? `(+${this.p2.shield})` : ''}`;
+        DOM.p1HpText.textContent = this.p1.loadout ? `${this.p1.hp}/${this.p1.loadout.stats.hpMax}` : '';
 
-        const me = (this.isPractice || NetworkManager.isHost) ? this.p1 : this.p2;
-        DOM.cdAttack.style.height = `${(me.attackCooldown / me.loadout.basicAttack.cooldown) * 100}%`;
+        if (!this.isPractice && this.p2.loadout) {
+            const p2HpRatio = Math.max(0, this.p2.hp / this.p2.loadout.stats.hpMax);
+            DOM.p2HpFill.style.width = `${p2HpRatio * 100}%`;
+            DOM.p2HpText.textContent = `${this.p2.hp}/${this.p2.loadout.stats.hpMax}`;
+        }
+
+        DOM.cdAttack.style.height = `${(myPlayer.attackCooldown / myPlayer.loadout.basicAttack.cooldown) * 100}%`;
         for (let i = 0; i < 3; i++) {
-            DOM.cdSkills[i].style.height = `${(me.skillCooldowns[i] / me.loadout.skills[i].cooldown) * 100}%`;
+            DOM.cdSkills[i].style.height = `${(myPlayer.skillCooldowns[i] / myPlayer.loadout.skills[i].cooldown) * 100}%`;
         }
     },
 
@@ -1026,28 +1124,29 @@ const GameManager = {
 
         ctx.clearRect(0, 0, ENGINE_CONFIG.CANVAS.WIDTH, ENGINE_CONFIG.CANVAS.HEIGHT);
 
-        // 背景暗角網格
-        ctx.strokeStyle = ENGINE_CONFIG.CANVAS.GRID_COLOR;
-        ctx.lineWidth = 1;
-        for (let x = 0; x < ENGINE_CONFIG.CANVAS.WIDTH; x += ENGINE_CONFIG.CANVAS.GRID_SIZE) {
-            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ENGINE_CONFIG.CANVAS.HEIGHT); ctx.stroke();
-        }
-        for (let y = 0; y < ENGINE_CONFIG.CANVAS.HEIGHT; y += ENGINE_CONFIG.CANVAS.GRID_SIZE) {
-            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(ENGINE_CONFIG.CANVAS.WIDTH, y); ctx.stroke();
+        // 攝影機視口平移轉換
+        this.camera.apply(ctx);
+
+        if (this.dungeonMap) {
+            this.dungeonMap.render(ctx, this.camera);
         }
 
-        // 實體與特效渲染
         this.groundAoes.forEach(a => a.draw(ctx));
-        this.p1.draw(ctx);
-        this.p2.draw(ctx);
+        this.enemies.forEach(e => e.draw(ctx));
+        if (this.p1.loadout) this.p1.draw(ctx);
+        if (!this.isPractice && this.p2.loadout) this.p2.draw(ctx);
         this.projectiles.forEach(p => p.draw(ctx));
+        this.enemyProjectiles.forEach(ep => ep.draw(ctx));
         this.meleeSweeps.forEach(s => s.draw(ctx));
         this.vfx.draw(ctx);
+
+        // 還原視口平移矩陣
+        this.camera.restore(ctx);
     }
 };
 
 /**
- * 主循環
+ * 引擎主迴圈
  */
 let lastTimestamp = 0;
 function mainLoop(timestamp) {
